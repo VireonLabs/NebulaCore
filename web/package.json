@@ -1,0 +1,44 @@
+{
+  "name": "NebulaCore",
+  "version": "1.0.0",
+  "private": true,
+  "description": "NebulaCore Distributed Supercomputer UI — Web + PWA + Mobile (Capacitor) + i18n",
+  "main": "src/index.tsx",
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "eject": "react-scripts eject",
+    "pwa": "workbox injectManifest",
+    "lint": "eslint \"src/**/*.{js,jsx,ts,tsx}\" || true",
+    "test": "react-scripts test --env=jsdom",
+    "format": "prettier --write \"src/**/*.{js,jsx,ts,tsx,json,css,md}\""
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-scripts": "5.0.1",
+    "i18next": "^22.0.0",
+    "react-i18next": "^12.0.0",
+    "workbox-webpack-plugin": "^7.0.0",
+    "@capacitor/core": "^5.0.0",
+    "@capacitor/android": "^5.0.0",
+    "@capacitor/ios": "^5.0.0",
+    "@capacitor/fingerprint-auth": "^5.0.0",
+    "web-vitals": "^3.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.1.0",
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
+    "eslint": "^8.0.0",
+    "prettier": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "browserslist": [
+    ">0.2%",
+    "not dead",
+    "not op_mini all"
+  ]
+}

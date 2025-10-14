@@ -1,0 +1,22 @@
+FROM golang:1.20-alpine AS builder
+RUN apk add --no-cache git ca-certificates build-base
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+ARG TARGETOS
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o control-plane ./cmd/control-plane
+
+FROM alpine:3.18
+RUN apk add --no-cache ca-certificates tzdata && update-ca-certificates
+RUN addgroup -S app && adduser -S -G app -u 1000 app
+WORKDIR /app
+COPY --from=builder /app/control-plane /app/control-plane
+RUN chown app:app /app/control-plane && chmod 0755 /app/control-plane
+ENV PORT=8080 \
+    GOMAXPROCS=2
+USER app
+EXPOSE 8080
+ENTRYPOINT ["/app/control-plane"]
+CMD []

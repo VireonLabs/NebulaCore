@@ -1,0 +1,10 @@
+{
+  "defaultAction": "SCMP_ACT_ERRNO",
+  "archMap": [
+    {"architecture": "SCMP_ARCH_X86_64", "subArchitectures": []}
+  ],
+  "syscalls": [
+    {"names": ["socket","connect","recvfrom","sendto","bind","listen","accept","getsockopt","setsockopt","getpeername","getaddrinfo"], "action": "SCMP_ACT_ALLOW"},
+    {"names": ["read","write","close","futex","clock_gettime"], "action": "SCMP_ACT_ALLOW"}
+  ]
+}

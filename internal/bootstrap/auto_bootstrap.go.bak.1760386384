@@ -1,0 +1,256 @@
+package bootstrap
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"sync"
+	"time"
+
+	"konrotaharai-netizen/internal/cryptoengine"
+	"konrotaharai-netizen/internal/ebpf"
+	"konrotaharai-netizen/internal/execwatcher"
+	"konrotaharai-netizen/internal/logging"
+	"konrotaharai-netizen/internal/monitoring"
+	"konrotaharai-netizen/internal/secstore"
+	"konrotaharai-netizen/internal/security"
+)
+
+// Component is the runtime component interface registerable with Coordinator.
+type Component interface {
+	ID() string
+	Start(ctx context.Context) error
+	Stop(ctx context.Context) error
+	Health() map[string]interface{}
+}
+
+// Coordinator is the runtime orchestrator / AI gateway.
+type Coordinator struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	KS       *secstore.SimpleEncryptedStore
+	Auditor  *logging.Auditor
+	Enforcer *security.EnforcementManager
+	Firewall *security.LaserFirewall
+	Watcher  *execwatcher.FanotifyWatcher
+	Monitor  *monitoring.Monitor
+	EBPFLdr  *ebpf.Loader
+
+	cryptoRegistry *cryptoengine.Registry
+
+	compsMu sync.Mutex
+	comps   map[string]Component
+
+	aiMu sync.Mutex
+	AI   *AIController
+
+	started bool
+	wg      sync.WaitGroup
+}
+
+// NewCoordinator creates a coordinator wiring minimal components.
+func NewCoordinator(ks *secstore.SimpleEncryptedStore, aud *logging.Auditor, enf *security.EnforcementManager, fw *security.LaserFirewall, ebpfL *ebpf.Loader, watcher *execwatcher.FanotifyWatcher, mon *monitoring.Monitor, cr *cryptoengine.Registry) *Coordinator {
+	ctx, cancel := context.WithCancel(context.Background())
+	c := &Coordinator{
+		ctx:            ctx,
+		cancel:         cancel,
+		KS:             ks,
+		Auditor:        aud,
+		Enforcer:       enf,
+		Firewall:       fw,
+		Watcher:        watcher,
+		Monitor:        mon,
+		EBPFLdr:        ebpfL,
+		cryptoRegistry: cr,
+		comps:          make(map[string]Component),
+	}
+	c.AI = NewAIController(c)
+	// best-effort: try to ensure keystore auto-unseal if available
+	if ks != nil {
+		// noop here; actual AutoUnseal performed in agent bootstrap
+	}
+	return c
+}
+
+// RegisterComponent registers a runtime component. Logs replacement and audits.
+func (c *Coordinator) RegisterComponent(comp Component) {
+	c.compsMu.Lock()
+	defer c.compsMu.Unlock()
+	if c.comps == nil {
+		c.comps = map[string]Component{}
+	}
+	id := comp.ID()
+	if _, exists := c.comps[id]; exists {
+		log.Printf("[coordinator] replacing existing component %s", id)
+	}
+	c.comps[id] = comp
+	if err := c.auditIfPossible(context.Background(), "coordinator.register", map[string]any{"component": id}); err != nil {
+		log.Printf("audit register warning: %v", err)
+	}
+}
+
+// UnregisterComponent removes component registration.
+func (c *Coordinator) UnregisterComponent(id string) {
+	c.compsMu.Lock()
+	defer c.compsMu.Unlock()
+	delete(c.comps, id)
+	if err := c.auditIfPossible(context.Background(), "coordinator.unregister", map[string]any{"component": id}); err != nil {
+		log.Printf("audit unregister warning: %v", err)
+	}
+}
+
+// GetComponent returns a registered component.
+func (c *Coordinator) GetComponent(id string) (Component, bool) {
+	c.compsMu.Lock()
+	defer c.compsMu.Unlock()
+	v, ok := c.comps[id]
+	return v, ok
+}
+
+// Start initializes components with context-aware backoff and orderly goroutine management.
+func (c *Coordinator) Start() error {
+	c.compsMu.Lock()
+	if c.started {
+		c.compsMu.Unlock()
+		return nil
+	}
+	c.compsMu.Unlock()
+
+	// context-aware exponential backoff with jitter
+	startWithBackoff := func(ctx context.Context, name string, fn func(context.Context) error) error {
+		var attempt int
+		base := 200 * time.Millisecond
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			if err := fn(ctx); err != nil {
+				attempt++
+				if attempt > 6 {
+					return fmt.Errorf("%s start failed after retries: %w", name, err)
+				}
+				wait := base * time.Duration(1<<uint(attempt))
+				// add jitter
+				jitter := time.Duration((time.Now().UnixNano()%100)) * time.Millisecond
+				select {
+				case <-time.After(wait + jitter):
+					continue
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+			return nil
+		}
+	}
+
+	ctx := c.ctx
+
+	// start watcher (may block until it initialises)
+	if c.Watcher != nil {
+		if err := startWithBackoff(ctx, "watcher", func(ctx context.Context) error { return c.Watcher.Start() }); err != nil {
+			return err
+		}
+		// register watcher
+		c.RegisterComponent(c.Watcher)
+	}
+
+	// start monitor (non-blocking)
+	if c.Monitor != nil {
+		c.wg.Add(1)
+		go func() {
+			defer c.wg.Done()
+			c.Monitor.Start(ctx)
+		}()
+		c.RegisterComponent(c.Monitor)
+	}
+
+	// helper to start components concurrently and register them
+	maybeStart := func(comp Component, name string) {
+		if comp == nil {
+			return
+		}
+		c.RegisterComponent(comp)
+		c.wg.Add(1)
+		go func() {
+			defer c.wg.Done()
+			if err := comp.Start(ctx); err != nil {
+				log.Printf("[coordinator] component %s failed to start: %v", name, err)
+			} else {
+				log.Printf("[coordinator] component %s started", name)
+			}
+		}()
+	}
+
+	maybeStart(c.Firewall, "firewall")
+	maybeStart(c.Enforcer, "enforcer")
+	if c.EBPFLdr != nil {
+		// eBPF loader may be a component as well
+		if cEBPF, ok := interface{}(c.EBPFLdr).(Component); ok {
+			maybeStart(cEBPF, "ebpf_loader")
+		}
+	}
+
+	// mark started protected by mutex
+	c.compsMu.Lock()
+	c.started = true
+	c.compsMu.Unlock()
+
+	if err := c.auditIfPossible(ctx, "coordinator.start", map[string]any{"ts": time.Now().UTC()}); err != nil {
+		log.Printf("audit start warning: %v", err)
+	}
+	log.Println("[coordinator] started")
+	return nil
+}
+
+// Stop gracefully stops components with deadlines and waits for background goroutines.
+func (c *Coordinator) Stop() {
+	// trigger cancel
+	c.cancel()
+
+	// collect components
+	c.compsMu.Lock()
+	var comps []Component
+	for _, comp := range c.comps {
+		comps = append(comps, comp)
+	}
+	c.compsMu.Unlock()
+
+	// stop each component with deadline
+	stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for _, comp := range comps {
+		_ = comp.Stop(stopCtx)
+	}
+
+	// stop monitor and watcher explicitly if present
+	if c.Monitor != nil {
+		c.Monitor.Stop()
+	}
+	if c.Watcher != nil {
+		_ = c.Watcher.Stop(context.Background())
+	}
+
+	if err := c.auditIfPossible(context.Background(), "coordinator.stop", map[string]any{"ts": time.Now().UTC()}); err != nil {
+		log.Printf("audit stop warning: %v", err)
+	}
+
+	// wait for background goroutines
+	done := make(chan struct{})
+	go func() {
+		c.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		log.Println("[coordinator] stop: timeout waiting for workers")
+	}
+
+	c.compsMu.Lock()
+	c.started = false
+	c.compsMu.Unlock()
+}
