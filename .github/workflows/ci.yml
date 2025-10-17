@@ -1,6 +1,5 @@
 name: NebulaCore CI (Self-healing, production-grade)
 
-# Triggers: limited to main/develop/release/* by default, plus manual dispatch and PRs to main
 on:
   push:
     branches:
@@ -14,7 +13,6 @@ on:
     branches: ["main"]
   workflow_dispatch: {}
 
-# Default top-level permissions: keep minimal (increase per-job when needed)
 permissions:
   contents: read
   id-token: write
@@ -30,17 +28,12 @@ env:
   PIP_CACHE_KEY: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
   GO_CACHE_KEY: ${{ runner.os }}-go-mod-${{ hashFiles('**/go.sum') }}
   NPM_CACHE_KEY: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
-
-  # Optional toggles (can be set via repo secrets or workflow_dispatch inputs)
   CHAOS_MODE: "false"
-  ARTIFACT_ENCRYPTION_KEY: ${{ secrets.ARTIFACT_ENCRYPTION_KEY || '' }}
+  ARTIFACT_ENCRYPTION_KEY: ${{ secrets.ARTIFACT_ENCRYPTION_KEY }}
   AUTO_PR_ON_MAIN: "true"
   SELF_HEAL_VERBOSE: "true"
 
 jobs:
-  # ------------------------------------------------------------------
-  # 0. Pipeline Inspector (Adaptive)
-  # ------------------------------------------------------------------
   inspect-pipeline:
     name: Inspect repo & shape pipeline (Adaptive)
     runs-on: ubuntu-latest
@@ -61,15 +54,12 @@ jobs:
         run: |
           echo "Inspecting repository layout..."
           has_go=false; has_python=false; has_node=false; has_web=false; has_tests=false; has_dockerfile=false
-
-          # heuristics for common files/folders
-          if [ -f go.mod ] || ls **/*.go >/dev/null 2>&1; then has_go=true; fi
-          if [ -f requirements.txt ] || ls **/*.py >/dev/null 2>&1; then has_python=true; fi
+          if [ -f go.mod ] || git ls-files '*.go' | grep -q .; then has_go=true; fi
+          if [ -f requirements.txt ] || git ls-files '*.py' | grep -q .; then has_python=true; fi
           if [ -f package.json ] || [ -d web ]; then has_node=true; fi
           if [ -d web ] || [ -f web/package.json ]; then has_web=true; fi
-          if [ -d tests ] || ls **/*_test.go >/dev/null 2>&1 || [ -f pytest.ini ]; then has_tests=true; fi
+          if [ -d tests ] || git ls-files '*_test.go' | grep -q . || [ -f pytest.ini ]; then has_tests=true; fi
           if [ -f Dockerfile ]; then has_dockerfile=true; fi
-
           mkdir -p .github/ai-hooks
           echo "has_go=$has_go" >> $GITHUB_OUTPUT
           echo "has_python=$has_python" >> $GITHUB_OUTPUT
@@ -94,18 +84,13 @@ jobs:
         with:
           name: repo-manifest
           path: ci-repo-manifest.txt
+          if-no-files-found: ignore
 
-  # ------------------------------------------------------------------
-  # 1. Build & Unit Tests (Go)
-  # ------------------------------------------------------------------
   build-go:
     name: Build & Test Go
     runs-on: ubuntu-latest
     needs: inspect-pipeline
     if: ${{ needs.inspect-pipeline.outputs.has_go == 'true' }}
-    strategy:
-      matrix:
-        go-version: [${{ env.GO_VERSION }}]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -121,7 +106,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
-          go-version: ${{ matrix.go-version }}
+          go-version: ${{ env.GO_VERSION }}
 
       - name: Ensure formatting & vet
         run: |
@@ -146,7 +131,6 @@ jobs:
             tail -n 500 $LOGFILE >> snapshot.txt || true
             tar -czf go-test-snapshot.tgz snapshot.txt || true
           }
-
           attempt=1
           max_attempts=3
           while [ $attempt -le $max_attempts ]; do
@@ -157,7 +141,6 @@ jobs:
             else
               echo "go test failed on attempt #$attempt, running diagnostics"
               snapshot
-
               if grep -q "no required module provides package" $LOGFILE || grep -q "cannot find module" $LOGFILE; then
                 echo "Detected missing module — attempting 'go get ./...' and retry"
                 go get ./... || true
@@ -173,7 +156,6 @@ jobs:
             fi
             attempt=$((attempt+1))
           done
-
           echo "go test failed after $max_attempts attempts, uploading snapshot"
           ls -lh go-test-snapshot.tgz || true
           exit 1
@@ -196,10 +178,8 @@ jobs:
           path: |
             ./control-plane
             ./agent
+          if-no-files-found: ignore
 
-  # ------------------------------------------------------------------
-  # 2. Lint & Security (Python)
-  # ------------------------------------------------------------------
   lint-python:
     name: Lint / Security Python
     runs-on: ubuntu-latest
@@ -255,15 +235,13 @@ jobs:
           path: |
             bandit-report.json
             pip-audit.json
+          if-no-files-found: ignore
 
-  # ------------------------------------------------------------------
-  # 3. Frontend: install & audit (node)
-  # ------------------------------------------------------------------
   frontend:
     name: Frontend build & audit
     runs-on: ubuntu-latest
     needs: inspect-pipeline
-    if: ${{ (needs.inspect-pipeline.outputs.has_web == 'true') || (needs.inspect-pipeline.outputs.has_node == 'true') }}
+    if: ${{ needs.inspect-pipeline.outputs.has_web == 'true' || needs.inspect-pipeline.outputs.has_node == 'true' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -317,10 +295,8 @@ jobs:
           path: |
             npm-audit.json
             npm-install.log
+          if-no-files-found: ignore
 
-  # ------------------------------------------------------------------
-  # 4. Security Scans (gosec + trivy + secret detection)
-  # ------------------------------------------------------------------
   security-scan:
     name: Security Scans (gosec + trivy + secret detection)
     runs-on: ubuntu-latest
@@ -340,7 +316,13 @@ jobs:
 
       - name: Run gosec (best-effort)
         run: |
-          $GOPATH/bin/gosec ./... || true
+          GOBIN="$(go env GOPATH 2>/dev/null)/bin"
+          if [ -x "$GOBIN/gosec" ]; then
+            "$GOBIN/gosec" ./... || true
+          else
+            go install github.com/securego/gosec/v2/cmd/gosec@latest || true
+            "$GOBIN/gosec" ./... || true
+          fi
 
       - name: Trivy container scan (if Dockerfile exists)
         if: ${{ needs.inspect-pipeline.outputs.has_dockerfile == 'true' }}
@@ -366,10 +348,8 @@ jobs:
           name: security-reports
           path: |
             gitleaks-report.json
+          if-no-files-found: ignore
 
-  # ------------------------------------------------------------------
-  # 5. Self-heal: Auto-fix Go (on PRs & non-main pushes)
-  # ------------------------------------------------------------------
   autofix-go:
     name: Auto-fix Go (fmt / tidy / vet / commit & PR)
     runs-on: ubuntu-latest
@@ -417,9 +397,6 @@ jobs:
           base: main
           branch: fix/nebulaci/go-fixes-${{ github.run_id }}
 
-  # ------------------------------------------------------------------
-  # 6. Self-heal: Auto-fix Python (black/isort/autoflake) on PRs/non-main pushes
-  # ------------------------------------------------------------------
   autofix-python:
     name: Auto-fix Python (format / deps)
     runs-on: ubuntu-latest
@@ -451,7 +428,7 @@ jobs:
           isort . || true
           autoflake --remove-all-unused-imports --in-place --recursive . || true
           if [ ! -f requirements.txt ] || ! python -m pip install -r requirements.txt >/dev/null 2>&1; then
-            echo "Regenerating requirements.txt with pipreqs (best-effort)"
+            echo "Regenerating requirements.txt مع pipreqs (best-effort)"
             pipreqs --force . || true
           fi
           git status --porcelain || true
@@ -475,9 +452,6 @@ jobs:
           base: main
           branch: fix/nebulaci/python-fixes-${{ github.run_id }}
 
-  # ------------------------------------------------------------------
-  # 7. CodeQL security analysis (deeper)
-  # ------------------------------------------------------------------
   codeql:
     name: CodeQL Analysis
     runs-on: ubuntu-latest
@@ -500,9 +474,6 @@ jobs:
       - name: Perform CodeQL Scan
         uses: github/codeql-action/analyze@v2
 
-  # ------------------------------------------------------------------
-  # 8. Ephemeral Staging (build container artifact + publish as artifact)
-  # ------------------------------------------------------------------
   ephemeral-staging:
     name: Build ephemeral staging artifact
     runs-on: ubuntu-latest
@@ -517,10 +488,8 @@ jobs:
           tar -czf /tmp/nebula-artifacts/nebula-artifacts.tgz ./ || true
 
       - name: Encrypt staging artifact (if key present)
-        if: ${{ env.ARTIFACT_ENCRYPTION_KEY != '' }}
         run: |
-          set -e
-          if [ -f /tmp/nebula-artifacts/nebula-artifacts.tgz ]; then
+          if [ -n "${ARTIFACT_ENCRYPTION_KEY:-}" ] && [ -f /tmp/nebula-artifacts/nebula-artifacts.tgz ]; then
             openssl enc -aes-256-cbc -salt -pbkdf2 -pass pass:"${ARTIFACT_ENCRYPTION_KEY}" -in /tmp/nebula-artifacts/nebula-artifacts.tgz -out /tmp/nebula-artifacts/nebula-artifacts.tgz.enc || true
             ls -lh /tmp/nebula-artifacts || true
           fi
@@ -532,10 +501,8 @@ jobs:
           path: |
             /tmp/nebula-artifacts/nebula-artifacts.tgz*
           retention-days: 7
+          if-no-files-found: ignore
 
-  # ------------------------------------------------------------------
-  # 9. Dependency Doctor (Autonomous Dependency Health)
-  # ------------------------------------------------------------------
   dependency-doctor:
     name: Dependency Doctor & Health Report
     runs-on: ubuntu-latest
@@ -557,17 +524,21 @@ jobs:
           go list -m -u all | sed -n '1,200p' || true
 
       - name: Node dependency check (best-effort)
-        if: ${{ needs.inspect-pipeline.outputs.has_node == 'true' && ( -f package.json ) }}
+        if: ${{ needs.inspect-pipeline.outputs.has_node == 'true' }}
         run: |
-          npm --version || true
-          ncu --jsonUpgradable > node-updates.json || true
-          jq -r 'keys[] as $k | "($k) -> (.[$k])"' node-updates.json > node-updates.txt || true
+          if [ -f package.json ]; then
+            npm --version || true
+            ncu --jsonUpgradable > node-updates.json || true
+            jq -r 'keys[] as $k | "($k) -> (.[$k])"' node-updates.json > node-updates.txt || true
+          fi
 
       - name: Python dependency check (best-effort)
-        if: ${{ needs.inspect-pipeline.outputs.has_python == 'true' && ( -f requirements.txt ) }}
+        if: ${{ needs.inspect-pipeline.outputs.has_python == 'true' }}
         run: |
-          pip-audit -r requirements.txt -f json -o python-dep-audit.json || true
-          pipdeptree --warn silence > pip-deptree.txt || true
+          if [ -f requirements.txt ]; then
+            pip-audit -r requirements.txt -f json -o python-dep-audit.json || true
+            pipdeptree --warn silence > pip-deptree.txt || true
+          fi
 
       - name: Generate Dependencies Health Report
         run: |
@@ -596,10 +567,8 @@ jobs:
             node-updates.json
             python-dep-audit.json
             pip-outdated.txt
+          if-no-files-found: ignore
 
-  # ------------------------------------------------------------------
-  # 10. Chaos-Resistant Mode (optional)
-  # ------------------------------------------------------------------
   chaos-testing:
     name: Chaos-Resistant Tests (Optional)
     runs-on: ubuntu-latest
@@ -633,9 +602,6 @@ jobs:
           rm -rf node_modules || true
           npm ci --no-audit --no-fund || true
 
-  # ------------------------------------------------------------------
-  # 11. Summary reporter (always runs, collects reports, posts checks)
-  # ------------------------------------------------------------------
   summary:
     name: CI Summary & Diagnostics
     runs-on: ubuntu-latest
@@ -660,10 +626,8 @@ jobs:
         with:
           name: ci-diagnostics
           path: ci-report
+          if-no-files-found: ignore
 
-  # ------------------------------------------------------------------
-  # 12. Final gating: fail workflow if critical checks failed
-  # ------------------------------------------------------------------
   gate:
     name: Gate - fail on critical issues
     runs-on: ubuntu-latest
