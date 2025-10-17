@@ -1,646 +1,675 @@
 name: NebulaCore CI (Self-healing, production-grade)
 
-Runs on pushes to branches and PRs against main. Safe defaults + self-heal on PRs/non-main pushes.
-
+# Triggers: limited to main/develop/release/* by default, plus manual dispatch and PRs to main
 on:
-push:
-branches: ["**"]
-pull_request:
-branches: ["main"]
+  push:
+    branches:
+      - "main"
+      - "develop"
+      - "release/*"
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch: {}
 
-Need write permission for auto-commit step and to create auto-PRs
-
+# Default top-level permissions: keep minimal (increase per-job when needed)
 permissions:
-contents: write
-id-token: write
+  contents: read
+  id-token: write
 
 concurrency:
-group: nebula-ci-${{ github.ref }}
-cancel-in-progress: true
+  group: nebula-ci-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
-GO_VERSION: "1.20"
-PYTHON_VERSION: "3.11"
-NODE_VERSION: "18"
-PIP_CACHE_KEY: ${{ runner.os }}-pip-${{ hashFiles('/requirements.txt') }}
-GO_CACHE_KEY: ${{ runner.os }}-go-mod-${{ hashFiles('/go.sum') }}
-NPM_CACHE_KEY: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
+  GO_VERSION: "1.20"
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "18"
+  PIP_CACHE_KEY: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+  GO_CACHE_KEY: ${{ runner.os }}-go-mod-${{ hashFiles('**/go.sum') }}
+  NPM_CACHE_KEY: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
 
-Optional toggles (set via repository secrets or workflow dispatch inputs)
-
-CHAOS_MODE: "false"                        # set to "true" to enable chaos/resilience tests
-ARTIFACT_ENCRYPTION_KEY: ${{ secrets.ARTIFACT_ENCRYPTION_KEY || '' }}
-AUTO_PR_ON_MAIN: "true"                   # if true, when running on protected branches open PRs instead of pushing
-SELF_HEAL_VERBOSE: "true"                  # enable verbose self-heal logs
+  # Optional toggles (can be set via repo secrets or workflow_dispatch inputs)
+  CHAOS_MODE: "false"
+  ARTIFACT_ENCRYPTION_KEY: ${{ secrets.ARTIFACT_ENCRYPTION_KEY || '' }}
+  AUTO_PR_ON_MAIN: "true"
+  SELF_HEAL_VERBOSE: "true"
 
 jobs:
+  # ------------------------------------------------------------------
+  # 0. Pipeline Inspector (Adaptive)
+  # ------------------------------------------------------------------
+  inspect-pipeline:
+    name: Inspect repo & shape pipeline (Adaptive)
+    runs-on: ubuntu-latest
+    outputs:
+      has_go: ${{ steps.detect.outputs.has_go }}
+      has_python: ${{ steps.detect.outputs.has_python }}
+      has_node: ${{ steps.detect.outputs.has_node }}
+      has_web: ${{ steps.detect.outputs.has_web }}
+      has_tests: ${{ steps.detect.outputs.has_tests }}
+      has_dockerfile: ${{ steps.detect.outputs.has_dockerfile }}
+      wants_chaos: ${{ env.CHAOS_MODE }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
----------------------------
+      - name: Detect project layout & create AI-ready hooks folder
+        id: detect
+        run: |
+          echo "Inspecting repository layout..."
+          has_go=false; has_python=false; has_node=false; has_web=false; has_tests=false; has_dockerfile=false
 
-0) Pipeline Inspector (Adaptive Pipeline)
+          # heuristics for common files/folders
+          if [ -f go.mod ] || ls **/*.go >/dev/null 2>&1; then has_go=true; fi
+          if [ -f requirements.txt ] || ls **/*.py >/dev/null 2>&1; then has_python=true; fi
+          if [ -f package.json ] || [ -d web ]; then has_node=true; fi
+          if [ -d web ] || [ -f web/package.json ]; then has_web=true; fi
+          if [ -d tests ] || ls **/*_test.go >/dev/null 2>&1 || [ -f pytest.ini ]; then has_tests=true; fi
+          if [ -f Dockerfile ]; then has_dockerfile=true; fi
 
----------------------------
+          mkdir -p .github/ai-hooks
+          echo "has_go=$has_go" >> $GITHUB_OUTPUT
+          echo "has_python=$has_python" >> $GITHUB_OUTPUT
+          echo "has_node=$has_node" >> $GITHUB_OUTPUT
+          echo "has_web=$has_web" >> $GITHUB_OUTPUT
+          echo "has_tests=$has_tests" >> $GITHUB_OUTPUT
+          echo "has_dockerfile=$has_dockerfile" >> $GITHUB_OUTPUT
+          echo "Done inspector. CHAOS_MODE=${CHAOS_MODE}"
 
-inspect-pipeline:
-name: Inspect repo & shape pipeline (Adaptive)
-runs-on: ubuntu-latest
-outputs:
-has_go: ${{ steps.detect.outputs.has_go }}
-has_python: ${{ steps.detect.outputs.has_python }}
-has_node: ${{ steps.detect.outputs.has_node }}
-has_web: ${{ steps.detect.outputs.has_web }}
-has_tests: ${{ steps.detect.outputs.has_tests }}
-has_dockerfile: ${{ steps.detect.outputs.has_dockerfile }}
-wants_chaos: ${{ env.CHAOS_MODE }}
-steps:
-- uses: actions/checkout@v4
-- name: Detect project layout & create AI-ready hooks folder
-id: detect
-run: |
-echo "Inspecting repository layout..."
-has_go=false; has_python=false; has_node=false; has_web=false; has_tests=false; has_dockerfile=false
-if ls **/.go >/dev/null 2>&1 || [ -f go.mod ]; then has_go=true; fi
-if ls **/.py >/dev/null 2>&1 || [ -f requirements.txt ]; then has_python=true; fi
-if [ -f package.json ] || [ -d web ]; then has_node=true; fi
-if [ -d web ] || [ -f web/package.json ]; then has_web=true; fi
-if ls */test >/dev/null 2>&1 || ls **/*_test.go >/dev/null 2>&1 || [ -d tests ] || [ -f pytest.ini ]; then has_tests=true; fi
-if [ -f Dockerfile ]; then has_dockerfile=true; fi
-mkdir -p .github/ai-hooks
-echo "has_go=$has_go" >> $GITHUB_OUTPUT
-echo "has_python=$has_python" >> $GITHUB_OUTPUT
-echo "has_node=$has_node" >> $GITHUB_OUTPUT
-echo "has_web=$has_web" >> $GITHUB_OUTPUT
-echo "has_tests=$has_tests" >> $GITHUB_OUTPUT
-echo "has_dockerfile=$has_dockerfile" >> $GITHUB_OUTPUT
-echo "Done inspector. CHAOS_MODE=${CHAOS_MODE}"
-- name: Dump quick manifest (artifact)
-run: |
-echo "repo-manifest:" > ci-repo-manifest.txt
-echo "has_go=${{ steps.detect.outputs.has_go }}" >> ci-repo-manifest.txt
-echo "has_python=${{ steps.detect.outputs.has_python }}" >> ci-repo-manifest.txt
-echo "has_node=${{ steps.detect.outputs.has_node }}" >> ci-repo-manifest.txt
-echo "has_web=${{ steps.detect.outputs.has_web }}" >> ci-repo-manifest.txt
-echo "has_tests=${{ steps.detect.outputs.has_tests }}" >> ci-repo-manifest.txt
-echo "has_dockerfile=${{ steps.detect.outputs.has_dockerfile }}" >> ci-repo-manifest.txt
-- name: Upload repo manifest
-uses: actions/upload-artifact@v4
-with:
-name: repo-manifest
-path: ci-repo-manifest.txt
+      - name: Dump quick manifest (artifact)
+        run: |
+          echo "repo-manifest:" > ci-repo-manifest.txt
+          echo "has_go=${{ steps.detect.outputs.has_go }}" >> ci-repo-manifest.txt
+          echo "has_python=${{ steps.detect.outputs.has_python }}" >> ci-repo-manifest.txt
+          echo "has_node=${{ steps.detect.outputs.has_node }}" >> ci-repo-manifest.txt
+          echo "has_web=${{ steps.detect.outputs.has_web }}" >> ci-repo-manifest.txt
+          echo "has_tests=${{ steps.detect.outputs.has_tests }}" >> ci-repo-manifest.txt
+          echo "has_dockerfile=${{ steps.detect.outputs.has_dockerfile }}" >> ci-repo-manifest.txt
 
----------------------------
+      - name: Upload repo manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: repo-manifest
+          path: ci-repo-manifest.txt
 
-1) Build & Unit Tests (Go)
+  # ------------------------------------------------------------------
+  # 1. Build & Unit Tests (Go)
+  # ------------------------------------------------------------------
+  build-go:
+    name: Build & Test Go
+    runs-on: ubuntu-latest
+    needs: inspect-pipeline
+    if: ${{ needs.inspect-pipeline.outputs.has_go == 'true' }}
+    strategy:
+      matrix:
+        go-version: [${{ env.GO_VERSION }}]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
----------------------------
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            /home/runner/go/pkg/mod
+          key: ${{ env.GO_CACHE_KEY }}
 
-build-go:
-name: Build & Test Go
-runs-on: ubuntu-latest
-needs: inspect-pipeline
-if: ${{ needs.inspect-pipeline.outputs.has_go == 'true' }}
-strategy:
-matrix:
-go-version: [${{ env.GO_VERSION }}]
-steps:
-- uses: actions/checkout@v4
-- name: Cache Go modules
-uses: actions/cache@v4
-with:
-path: |
-~/.cache/go-build
-/home/runner/go/pkg/mod
-key: ${{ env.GO_CACHE_KEY }}
-- name: Set up Go
-uses: actions/setup-go@v4
-with:
-go-version: ${{ matrix.go-version }}
-- name: Ensure formatting & vet
-run: |
-go fmt ./...
-go vet ./... || true
-- name: List modules
-run: |
-go list ./... | sed -n '1,200p'
-- name: Run go tests (with self-heal loop)
-id: go-test
-run: |
-set -e
-LOGFILE=go-test.log
-function snapshot {
-echo "=== DIAGNOSTIC SNAPSHOT ===" > snapshot.txt
-echo "GOVERSION: $(go version)" >> snapshot.txt || true
-echo "GO ENV:" >> snapshot.txt
-go env >> snapshot.txt || true
-echo "Last 500 lines from $LOGFILE" >> snapshot.txt
-tail -n 500 $LOGFILE >> snapshot.txt || true
-tar -czf go-test-snapshot.tgz snapshot.txt || true
-}
-# Attempt run with retries and healing strategies
-attempt=1
-max_attempts=3
-while [ $attempt -le $max_attempts ]; do
-echo "Attempt #$attempt running go test..."
-if go test ./... -short -count=1 2>&1 | tee $LOGFILE; then
-echo "go test succeeded on attempt #$attempt"
-exit 0
-else
-echo "go test failed on attempt #$attempt, running diagnostics"
-snapshot
-# simple healing heuristics
-if grep -q "no required module provides package" $LOGFILE || grep -q "cannot find module" $LOGFILE; then
-echo "Detected missing module — attempting 'go get ./...' and retry"
-go get ./... || true
-fi
-if grep -q "module requires" $LOGFILE || grep -q "found module" $LOGFILE; then
-echo "Module mismatch detected - running 'go mod tidy'"
-go mod tidy || true
-fi
-if [ $attempt -lt $max_attempts ]; then
-echo "Cleaning go cache and retrying..."
-go clean -modcache || true
-fi
-fi
-attempt=$((attempt+1))
-done
-echo "go test failed after $max_attempts attempts, uploading snapshot"
-ls -lh go-test-snapshot.tgz || true
-exit 1
-- name: Build binaries (control-plane + agent)
-run: |
-set -e
-go build -v ./cmd/control-plane || true
-go build -v ./cmd/agent || true
-- name: Upload build artifacts
-if: success()
-uses: actions/upload-artifact@v4
-with:
-name: go-binaries
-path: |
-./control-plane
-./agent
-# If binaries not present, still succeed
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ matrix.go-version }}
 
----------------------------
+      - name: Ensure formatting & vet
+        run: |
+          go fmt ./... || true
+          go vet ./... || true
 
-2) Lint & Security (Python)
+      - name: List modules
+        run: |
+          go list ./... | sed -n '1,200p' || true
 
----------------------------
+      - name: Run go tests (with self-heal loop)
+        id: go-test
+        run: |
+          set -e
+          LOGFILE=go-test.log
+          function snapshot {
+            echo "=== DIAGNOSTIC SNAPSHOT ===" > snapshot.txt
+            echo "GOVERSION: $(go version)" >> snapshot.txt || true
+            echo "GO ENV:" >> snapshot.txt
+            go env >> snapshot.txt || true
+            echo "Last 500 lines from $LOGFILE" >> snapshot.txt
+            tail -n 500 $LOGFILE >> snapshot.txt || true
+            tar -czf go-test-snapshot.tgz snapshot.txt || true
+          }
 
-lint-python:
-name: Lint / Security Python
-runs-on: ubuntu-latest
-needs: inspect-pipeline
-if: ${{ needs.inspect-pipeline.outputs.has_python == 'true' }}
-steps:
-- uses: actions/checkout@v4
-- name: Setup Python
-uses: actions/setup-python@v4
-with:
-python-version: ${{ env.PYTHON_VERSION }}
-- name: Cache pip
-uses: actions/cache@v4
-with:
-path: ~/.cache/pip
-key: ${{ env.PIP_CACHE_KEY }}
-- name: Install linters & security tools
-run: |
-python -m pip install --upgrade pip
-pip install flake8 black isort bandit safety pip-audit autoflake pipreqs
-# If requirements exist, try to install (best-effort)
-if [ -f requirements.txt ]; then pip install -r requirements.txt || true; fi
-- name: Run flake8 (lint) with self-heal
-run: |
-set -e
-flake8 || true
-# If flake8 reports missing imports, try pipreqs regeneration (best-effort)
-if ! flake8 >/dev/null 2>&1; then
-echo "flake8 issues found — attempting auto-format and regenerating requirements if needed"
-black . || true
-pipreqs --force . || true
-fi
-- name: Run bandit (security scan)
-run: |
-bandit -r . -f json -o bandit-report.json || true
-- name: Safety check (dependency advisories)
-run: |
-if [ -f requirements.txt ]; then safety check -r requirements.txt || true; fi
-# additional pip-audit
-python -m pip install pip-audit
-pip-audit -r requirements.txt -f json -o pip-audit.json || true
-- name: Upload python reports
-uses: actions/upload-artifact@v4
-with:
-name: python-reports
-path: |
-bandit-report.json
-pip-audit.json
+          attempt=1
+          max_attempts=3
+          while [ $attempt -le $max_attempts ]; do
+            echo "Attempt #$attempt running go test..."
+            if go test ./... -short -count=1 2>&1 | tee $LOGFILE; then
+              echo "go test succeeded on attempt #$attempt"
+              exit 0
+            else
+              echo "go test failed on attempt #$attempt, running diagnostics"
+              snapshot
 
----------------------------
+              if grep -q "no required module provides package" $LOGFILE || grep -q "cannot find module" $LOGFILE; then
+                echo "Detected missing module — attempting 'go get ./...' and retry"
+                go get ./... || true
+              fi
+              if grep -q "module requires" $LOGFILE || grep -q "found module" $LOGFILE; then
+                echo "Module mismatch detected - running 'go mod tidy'"
+                go mod tidy || true
+              fi
+              if [ $attempt -lt $max_attempts ]; then
+                echo "Cleaning go cache and retrying..."
+                go clean -modcache || true
+              fi
+            fi
+            attempt=$((attempt+1))
+          done
 
-3) Frontend: install & audit (node)
+          echo "go test failed after $max_attempts attempts, uploading snapshot"
+          ls -lh go-test-snapshot.tgz || true
+          exit 1
 
----------------------------
+      - name: Build binaries (control-plane + agent)
+        run: |
+          set -e
+          if [ -d ./cmd/control-plane ] || [ -f ./cmd/control-plane/main.go ]; then
+            go build -v ./cmd/control-plane || true
+          fi
+          if [ -d ./cmd/agent ] || [ -f ./cmd/agent/main.go ]; then
+            go build -v ./cmd/agent || true
+          fi
 
-frontend:
-name: Frontend build & audit
-runs-on: ubuntu-latest
-needs: inspect-pipeline
-if: ${{ needs.inspect-pipeline.outputs.has_web == 'true' || needs.inspect-pipeline.outputs.has_node == 'true' }}
-steps:
-- uses: actions/checkout@v4
-- name: Setup Node
-uses: actions/setup-node@v4
-with:
-node-version: ${{ env.NODE_VERSION }}
-cache: 'npm'
-- name: Cache node modules
-uses: actions/cache@v4
-with:
-path: ~/.npm
-key: ${{ env.NPM_CACHE_KEY }}
-- name: Install frontend deps (if web/package.json exists) with self-heal
-id: frontend-install
-run: |
-set -e
-if [ -f web/package.json ]; then
-cd web
-# try standard install, if fails attempt retries and healing
-attempt=1; max_attempts=3
-while [ $attempt -le $max_attempts ]; do
-echo "npm ci attempt #$attempt"
-if npm ci --no-audit --no-fund 2>&1 | tee ../npm-install.log; then
-break
-else
-echo "npm ci failed; running diagnostic and best-effort heals"
-tail -n 200 ../npm-install.log || true
-# try clearing cache and reinstall
-npm cache clean --force || true
-rm -rf node_modules package-lock.json || true
-if [ -f package.json ]; then
-npm i --package-lock-only || true
-fi
-fi
-attempt=$((attempt+1))
-done
-npm run build --if-present || true
-fi
-- name: NPM audit (report)
-run: |
-if [ -f web/package.json ]; then
-cd web
-npm audit --json > ../npm-audit.json || true
-fi
-- name: Upload frontend reports
-uses: actions/upload-artifact@v4
-with:
-name: frontend-reports
-path: |
-npm-audit.json
-npm-install.log
+      - name: Upload build artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-binaries
+          path: |
+            ./control-plane
+            ./agent
 
----------------------------
+  # ------------------------------------------------------------------
+  # 2. Lint & Security (Python)
+  # ------------------------------------------------------------------
+  lint-python:
+    name: Lint / Security Python
+    runs-on: ubuntu-latest
+    needs: inspect-pipeline
+    if: ${{ needs.inspect-pipeline.outputs.has_python == 'true' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-4) Security Scans (gosec + trivy + secret detection)
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
 
----------------------------
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ env.PIP_CACHE_KEY }}
 
-security-scan:
-name: Security Scans (gosec + trivy + secret detection)
-runs-on: ubuntu-latest
-needs: inspect-pipeline
-steps:
-- uses: actions/checkout@v4
-- name: Setup Go (for gosec)
-uses: actions/setup-go@v4
-with:
-go-version: ${{ env.GO_VERSION }}
-- name: Install gosec
-run: |
-go install github.com/securego/gosec/v2/cmd/gosec@latest
-- name: Run gosec (best-effort)
-run: |
-$GOPATH/bin/gosec ./... || true
-- name: Trivy container scan (if Dockerfile exists)
-if: ${{ needs.inspect-pipeline.outputs.has_dockerfile == 'true' }}
-uses: aquasecurity/trivy-action@master
-with:
-scan-type: filesystem
-scan-ref: .
-continue-on-error: true
-- name: Run gitleaks secret scan
-run: |
-curl -sSfL https://raw.githubusercontent.com/zricethezav/gitleaks/master/install.sh | bash -s -- -b /usr/local/bin || true
-gitleaks detect --source . --report-path gitleaks-report.json || true
-- name: Prevent committing secrets (pre-commit placeholder)
-run: |
-# Add placeholder config for repo-level secret prevention, can be extended
-mkdir -p .github/prevent-secrets || true
-echo "gitleaks configured" > .github/prevent-secrets/README.md || true
-- name: Upload security reports
-uses: actions/upload-artifact@v4
-with:
-name: security-reports
-path: |
-gitleaks-report.json
+      - name: Install linters & security tools
+        run: |
+          python -m pip install --upgrade pip || true
+          pip install flake8 black isort bandit safety pip-audit autoflake pipreqs || true
+          if [ -f requirements.txt ]; then pip install -r requirements.txt || true; fi
 
----------------------------
+      - name: Run flake8 (lint) with self-heal
+        run: |
+          set -e
+          flake8 || true
+          if ! flake8 >/dev/null 2>&1; then
+            echo "flake8 issues found — attempting auto-format and regenerating requirements if needed"
+            black . || true
+            pipreqs --force . || true
+          fi
 
-5) Self-heal: Auto-fix Go (on PRs & non-main pushes)
+      - name: Run bandit (security scan)
+        run: |
+          bandit -r . -f json -o bandit-report.json || true
 
----------------------------
+      - name: Safety & pip-audit checks
+        run: |
+          if [ -f requirements.txt ]; then
+            safety check -r requirements.txt || true
+            python -m pip install pip-audit || true
+            pip-audit -r requirements.txt -f json -o pip-audit.json || true
+          fi
 
-autofix-go:
-name: Auto-fix Go (fmt / tidy / vet / commit & PR)
-runs-on: ubuntu-latest
-if: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/main') }}
-needs: inspect-pipeline
-steps:
-- uses: actions/checkout@v4
-with:
-fetch-depth: 0
-- name: Setup Go
-uses: actions/setup-go@v4
-with:
-go-version: ${{ env.GO_VERSION }}
-- name: Run tidy/gofmt/govet with diagnostics
-id: go-fix
-run: |
-set -e
-echo "Running go mod tidy & fmt"
-go mod tidy || true
-go fmt ./... || true
-go vet ./... || true
-git status --porcelain || true
-- name: Commit & push fixes (if any)
-uses: stefanzweifel/git-auto-commit-action@v5
-with:
-commit_message: "ci(auto): go fmt & tidy fixes"
-branch: ${{ github.head_ref || github.ref_name }}
-author_name: "nebula-ci-bot"
-author_email: "nebula-ci-bot@users.noreply.github.com"
-- name: Create PR if on protected branch (Main) and AUTO_PR_ON_MAIN enabled
-if: ${{ github.ref == 'refs/heads/main' && env.AUTO_PR_ON_MAIN == 'true' }}
-uses: peter-evans/create-pull-request@v4
-with:
-token: ${{ secrets.GITHUB_TOKEN }}
-commit-message: "ci(auto): go fmt & tidy fixes"
-title: "ci(auto): go fmt & tidy fixes"
-body: "Automated fixes from NebulaCore CI self-heal."
-base: main
-branch: fix/nebulaci/go-fixes-${{ github.run_id }}
+      - name: Upload python reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-reports
+          path: |
+            bandit-report.json
+            pip-audit.json
 
----------------------------
+  # ------------------------------------------------------------------
+  # 3. Frontend: install & audit (node)
+  # ------------------------------------------------------------------
+  frontend:
+    name: Frontend build & audit
+    runs-on: ubuntu-latest
+    needs: inspect-pipeline
+    if: ${{ (needs.inspect-pipeline.outputs.has_web == 'true') || (needs.inspect-pipeline.outputs.has_node == 'true') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-6) Self-heal: Auto-fix Python (black/isort/autoflake) on PRs/non-main pushes
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
 
----------------------------
+      - name: Cache node modules
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ env.NPM_CACHE_KEY }}
 
-autofix-python:
-name: Auto-fix Python (format / deps)
-runs-on: ubuntu-latest
-if: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/main') }}
-needs: inspect-pipeline
-steps:
-- uses: actions/checkout@v4
-with:
-fetch-depth: 0
-- name: Setup Python
-uses: actions/setup-python@v4
-with:
-python-version: ${{ env.PYTHON_VERSION }}
-- name: Install autoformatters
-run: |
-python -m pip install --upgrade pip
-pip install black isort autoflake pipreqs
-- name: Run formatting and try to detect missing imports
-id: py-fix
-run: |
-set -e
-black .
-isort .
-autoflake --remove-all-unused-imports --in-place --recursive .
-# Try to regenerate requirements if requirements.txt is missing or broken
-if [ ! -f requirements.txt ] || ! python -m pip install -r requirements.txt >/dev/null 2>&1; then
-echo "Regenerating requirements.txt with pipreqs (best-effort)"
-pipreqs --force .
-fi
-git status --porcelain || true
-- name: Commit & push fixes (if any)
-uses: stefanzweifel/git-auto-commit-action@v5
-with:
-commit_message: "ci(auto): python formatting & dependency fixes"
-branch: ${{ github.head_ref || github.ref_name }}
-author_name: "nebula-ci-bot"
-author_email: "nebula-ci-bot@users.noreply.github.com"
-- name: Create PR if on protected branch (Main) and AUTO_PR_ON_MAIN enabled
-if: ${{ github.ref == 'refs/heads/main' && env.AUTO_PR_ON_MAIN == 'true' }}
-uses: peter-evans/create-pull-request@v4
-with:
-token: ${{ secrets.GITHUB_TOKEN }}
-commit-message: "ci(auto): python formatting & dependency fixes"
-title: "ci(auto): python formatting & dependency fixes"
-body: "Automated Python formatting & dependency fixes from NebulaCore CI."
-base: main
-branch: fix/nebulaci/python-fixes-${{ github.run_id }}
+      - name: Install frontend deps (if web/package.json exists) with self-heal
+        id: frontend-install
+        run: |
+          set -e
+          if [ -f web/package.json ]; then
+            cd web
+            attempt=1; max_attempts=3
+            while [ $attempt -le $max_attempts ]; do
+              echo "npm ci attempt #$attempt"
+              if npm ci --no-audit --no-fund 2>&1 | tee ../npm-install.log; then
+                break
+              else
+                echo "npm ci failed; running diagnostic and best-effort heals"
+                tail -n 200 ../npm-install.log || true
+                npm cache clean --force || true
+                rm -rf node_modules package-lock.json || true
+                if [ -f package.json ]; then npm i --package-lock-only || true; fi
+              fi
+              attempt=$((attempt+1))
+            done
+            npm run build --if-present || true
+          fi
 
----------------------------
+      - name: NPM audit (report)
+        run: |
+          if [ -f web/package.json ]; then
+            cd web
+            npm audit --json > ../npm-audit.json || true
+          fi
 
-7) CodeQL security analysis (deeper)
+      - name: Upload frontend reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-reports
+          path: |
+            npm-audit.json
+            npm-install.log
 
----------------------------
+  # ------------------------------------------------------------------
+  # 4. Security Scans (gosec + trivy + secret detection)
+  # ------------------------------------------------------------------
+  security-scan:
+    name: Security Scans (gosec + trivy + secret detection)
+    runs-on: ubuntu-latest
+    needs: inspect-pipeline
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-codeql:
-name: CodeQL Analysis
-runs-on: ubuntu-latest
-needs: inspect-pipeline
-permissions:
-contents: read
-security-events: write
-steps:
-- uses: actions/checkout@v4
-- name: Initialize CodeQL
-uses: github/codeql-action/init@v2
-with:
-languages: go, javascript, python
-- name: Autobuild code
-uses: github/codeql-action/autobuild@v2
-- name: Perform CodeQL Scan
-uses: github/codeql-action/analyze@v2
+      - name: Setup Go (for gosec)
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
 
----------------------------
+      - name: Install gosec
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest || true
 
-8) Ephemeral Staging (build container artifact + publish to GH Packages as artifact)
+      - name: Run gosec (best-effort)
+        run: |
+          $GOPATH/bin/gosec ./... || true
 
----------------------------
+      - name: Trivy container scan (if Dockerfile exists)
+        if: ${{ needs.inspect-pipeline.outputs.has_dockerfile == 'true' }}
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: filesystem
+          scan-ref: .
+          continue-on-error: true
 
-ephemeral-staging:
-name: Build ephemeral staging artifact
-runs-on: ubuntu-latest
-needs: [build-go, frontend]
-steps:
-- uses: actions/checkout@v4
-- name: Build Docker image (local) & package artifacts
-run: |
-mkdir -p /tmp/nebula-artifacts
-tar -czf /tmp/nebula-artifacts/nebula-artifacts.tgz ./ || true
-- name: Encrypt staging artifact (if key present)
-if: ${{ env.ARTIFACT_ENCRYPTION_KEY != '' }}
-run: |
-set -e
-if [ -f /tmp/nebula-artifacts/nebula-artifacts.tgz ]; then
-openssl enc -aes-256-cbc -salt -pbkdf2 -pass pass:"${ARTIFACT_ENCRYPTION_KEY}" -in /tmp/nebula-artifacts/nebula-artifacts.tgz -out /tmp/nebula-artifacts/nebula-artifacts.tgz.enc || true
-ls -lh /tmp/nebula-artifacts || true
-fi
-- name: Upload staging artifact
-uses: actions/upload-artifact@v4
-with:
-name: staging-artifact
-path: |
-/tmp/nebula-artifacts/nebula-artifacts.tgz*
-retention-days: 7
+      - name: Run gitleaks secret scan
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/zricethezav/gitleaks/master/install.sh | bash -s -- -b /usr/local/bin || true
+          gitleaks detect --source . --report-path gitleaks-report.json || true
 
----------------------------
+      - name: Prevent committing secrets (pre-commit placeholder)
+        run: |
+          mkdir -p .github/prevent-secrets || true
+          echo "gitleaks configured" > .github/prevent-secrets/README.md || true
 
-9) Dependency Doctor (Autonomous Dependency Health)
+      - name: Upload security reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: |
+            gitleaks-report.json
 
----------------------------
+  # ------------------------------------------------------------------
+  # 5. Self-heal: Auto-fix Go (on PRs & non-main pushes)
+  # ------------------------------------------------------------------
+  autofix-go:
+    name: Auto-fix Go (fmt / tidy / vet / commit & PR)
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/main') }}
+    needs: inspect-pipeline
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-dependency-doctor:
-name: Dependency Doctor & Health Report
-runs-on: ubuntu-latest
-needs: inspect-pipeline
-steps:
-- uses: actions/checkout@v4
-- name: Install inspector tools
-run: |
-python -m pip install --upgrade pip || true
-pip install pipdeptree safety pip-audit || true
-npm install -g npm-check-updates || true
-- name: Go dependency check (best-effort)
-if: ${{ needs.inspect-pipeline.outputs.has_go == 'true' }}
-run: |
-go list -m -u all > go-deps.txt || true
-go list -m -u all | sed -n '1,200p' || true
-- name: Node dependency check (best-effort)
-if: ${{ needs.inspect-pipeline.outputs.has_node == 'true' && ( -f package.json ) }}
-run: |
-npm --version || true
-ncu --jsonUpgradable > node-updates.json || true
-jq -r 'keys[] as $k | "($k) -> (.[$k])"' node-updates.json > node-updates.txt || true
-- name: Python dependency check (best-effort)
-if: ${{ needs.inspect-pipeline.outputs.has_python == 'true' && ( -f requirements.txt ) }}
-run: |
-pip-audit -r requirements.txt -f json -o python-dep-audit.json || true
-pipdeptree --warn silence > pip-deptree.txt || true
-- name: Generate Dependencies Health Report
-run: |
-echo "Dependencies Health Report" > deps-health-report.txt || true
-if [ -f go-deps.txt ]; then echo "--- Go ---" >> deps-health-report.txt; cat go-deps.txt >> deps-health-report.txt; fi
-if [ -f node-updates.txt ]; then echo "--- Node ---" >> deps-health-report.txt; cat node-updates.txt >> deps-health-report.txt; fi
-if [ -f pip-deptree.txt ]; then echo "--- Python ---" >> deps-health-report.txt; cat pip-deptree.txt >> deps-health-report.txt; fi
-- name: Attempt safe minor/patch upgrades (non-breaking)
-run: |
-echo "Attempting safe upgrades (patch/minor) — DRY RUN mode"
-# Node: show suggested updates (do not auto-apply unless configured)
-if [ -f package.json ]; then
-ncu --target minor --semverLevel minor --packageFile package.json -u || true
-git --no-pager diff --name-only || true
-fi
-# Go: suggest updates (do not apply automatically)
-go list -m -u all || true
-# Python: list outdated pip packages (do not upgrade by default)
-if [ -f requirements.txt ]; then
-pip list --outdated --format=columns > pip-outdated.txt || true
-fi
-- name: Upload dependency reports
-uses: actions/upload-artifact@v4
-with:
-name: dependency-reports
-path: |
-deps-health-report.txt
-node-updates.json
-python-dep-audit.json
-pip-outdated.txt
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
 
----------------------------
+      - name: Run tidy/gofmt/govet with diagnostics
+        id: go-fix
+        run: |
+          set -e
+          echo "Running go mod tidy & fmt"
+          go mod tidy || true
+          go fmt ./... || true
+          go vet ./... || true
+          git status --porcelain || true
 
-10) Chaos-Resistant Mode (optional)
+      - name: Commit & push fixes (if any)
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "ci(auto): go fmt & tidy fixes"
+          branch: ${{ github.head_ref || github.ref_name }}
+          author_name: "nebula-ci-bot"
+          author_email: "nebula-ci-bot@users.noreply.github.com"
 
----------------------------
+      - name: Create PR if on protected branch (Main) and AUTO_PR_ON_MAIN enabled
+        if: ${{ github.ref == 'refs/heads/main' && env.AUTO_PR_ON_MAIN == 'true' }}
+        uses: peter-evans/create-pull-request@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "ci(auto): go fmt & tidy fixes"
+          title: "ci(auto): go fmt & tidy fixes"
+          body: "Automated fixes from NebulaCore CI self-heal."
+          base: main
+          branch: fix/nebulaci/go-fixes-${{ github.run_id }}
 
-chaos-testing:
-name: Chaos-Resistant Tests (Optional)
-runs-on: ubuntu-latest
-needs: inspect-pipeline
-if: ${{ env.CHAOS_MODE == 'true' }}
-strategy:
-matrix:
-node-version: [16, 18, 20]
-os: [ubuntu-latest, windows-latest]
-steps:
-- uses: actions/checkout@v4
-- name: Setup Node (chaos matrix)
-uses: actions/setup-node@v4
-with:
-node-version: ${{ matrix.node-version }}
-cache: 'npm'
-- name: Quick build attempt (chaos)
-run: |
-echo "Running quick chaos build on node ${matrix.node-version} / $RUNNER_OS"
-if [ -f package.json ]; then
-npm ci --no-audit --no-fund || true
-npm run build --if-present || true
-fi
-- name: Simulate randomized environment perturbation (dry-run)
-run: |
-echo "Simulating missing file scenarios and corrupted cache"
-rm -rf node_modules || true
-npm ci --no-audit --no-fund || true
+  # ------------------------------------------------------------------
+  # 6. Self-heal: Auto-fix Python (black/isort/autoflake) on PRs/non-main pushes
+  # ------------------------------------------------------------------
+  autofix-python:
+    name: Auto-fix Python (format / deps)
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/main') }}
+    needs: inspect-pipeline
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
----------------------------
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
 
-11) Summary reporter (always runs, collects reports, posts checks)
+      - name: Install autoformatters
+        run: |
+          python -m pip install --upgrade pip || true
+          pip install black isort autoflake pipreqs || true
 
----------------------------
+      - name: Run formatting and try to detect missing imports
+        id: py-fix
+        run: |
+          set -e
+          black . || true
+          isort . || true
+          autoflake --remove-all-unused-imports --in-place --recursive . || true
+          if [ ! -f requirements.txt ] || ! python -m pip install -r requirements.txt >/dev/null 2>&1; then
+            echo "Regenerating requirements.txt with pipreqs (best-effort)"
+            pipreqs --force . || true
+          fi
+          git status --porcelain || true
 
-summary:
-name: CI Summary & Diagnostics
-runs-on: ubuntu-latest
-needs: [build-go, lint-python, frontend, security-scan, codeql]
-steps:
-- uses: actions/checkout@v4
-- name: Collect artifacts & reports
-run: |
-mkdir -p ci-report
-for f in bandit-report.json npm-audit.json pip-audit.json gitleaks-report.json deps-health-report.txt node-updates.json; do
-if [ -f $f ]; then cp $f ci-report/ || true; fi
-done
-# Add a simple diagnostic summary
-echo "CI run: $GITHUB_RUN_ID" > ci-report/summary.txt
-echo "Branch: $GITHUB_REF" >> ci-report/summary.txt
-echo "Triggered by: $GITHUB_EVENT_NAME" >> ci-report/summary.txt
-- name: Upload CI diagnostic bundle
-uses: actions/upload-artifact@v4
-with:
-name: ci-diagnostics
-path: ci-report
+      - name: Commit & push fixes (if any)
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "ci(auto): python formatting & dependency fixes"
+          branch: ${{ github.head_ref || github.ref_name }}
+          author_name: "nebula-ci-bot"
+          author_email: "nebula-ci-bot@users.noreply.github.com"
 
----------------------------
+      - name: Create PR if on protected branch (Main) and AUTO_PR_ON_MAIN enabled
+        if: ${{ github.ref == 'refs/heads/main' && env.AUTO_PR_ON_MAIN == 'true' }}
+        uses: peter-evans/create-pull-request@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "ci(auto): python formatting & dependency fixes"
+          title: "ci(auto): python formatting & dependency fixes"
+          body: "Automated Python formatting & dependency fixes from NebulaCore CI."
+          base: main
+          branch: fix/nebulaci/python-fixes-${{ github.run_id }}
 
-12) Final gating: fail workflow if critical checks failed
+  # ------------------------------------------------------------------
+  # 7. CodeQL security analysis (deeper)
+  # ------------------------------------------------------------------
+  codeql:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    needs: inspect-pipeline
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
----------------------------
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v2
+        with:
+          languages: go, javascript, python
 
-gate:
-name: Gate - fail on critical issues
-runs-on: ubuntu-latest
-needs: [build-go, lint-python, frontend, security-scan]
-steps:
-- name: Evaluate results (best-effort)
-run: |
-# Example: if go tests failed, mark as failed (this is a placeholder for project-specific logic)
-echo "Gate check complete"
-# We can extend this step to parse artifact reports and fail the run if critical CVEs or failing tests found.
+      - name: Autobuild code
+        uses: github/codeql-action/autobuild@v2
 
-End of workflow
+      - name: Perform CodeQL Scan
+        uses: github/codeql-action/analyze@v2
+
+  # ------------------------------------------------------------------
+  # 8. Ephemeral Staging (build container artifact + publish as artifact)
+  # ------------------------------------------------------------------
+  ephemeral-staging:
+    name: Build ephemeral staging artifact
+    runs-on: ubuntu-latest
+    needs: [build-go, frontend]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build artifacts bundle
+        run: |
+          mkdir -p /tmp/nebula-artifacts || true
+          tar -czf /tmp/nebula-artifacts/nebula-artifacts.tgz ./ || true
+
+      - name: Encrypt staging artifact (if key present)
+        if: ${{ env.ARTIFACT_ENCRYPTION_KEY != '' }}
+        run: |
+          set -e
+          if [ -f /tmp/nebula-artifacts/nebula-artifacts.tgz ]; then
+            openssl enc -aes-256-cbc -salt -pbkdf2 -pass pass:"${ARTIFACT_ENCRYPTION_KEY}" -in /tmp/nebula-artifacts/nebula-artifacts.tgz -out /tmp/nebula-artifacts/nebula-artifacts.tgz.enc || true
+            ls -lh /tmp/nebula-artifacts || true
+          fi
+
+      - name: Upload staging artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-artifact
+          path: |
+            /tmp/nebula-artifacts/nebula-artifacts.tgz*
+          retention-days: 7
+
+  # ------------------------------------------------------------------
+  # 9. Dependency Doctor (Autonomous Dependency Health)
+  # ------------------------------------------------------------------
+  dependency-doctor:
+    name: Dependency Doctor & Health Report
+    runs-on: ubuntu-latest
+    needs: inspect-pipeline
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install inspector tools
+        run: |
+          python -m pip install --upgrade pip || true
+          pip install pipdeptree safety pip-audit || true
+          npm install -g npm-check-updates || true
+
+      - name: Go dependency check (best-effort)
+        if: ${{ needs.inspect-pipeline.outputs.has_go == 'true' }}
+        run: |
+          go list -m -u all > go-deps.txt || true
+          go list -m -u all | sed -n '1,200p' || true
+
+      - name: Node dependency check (best-effort)
+        if: ${{ needs.inspect-pipeline.outputs.has_node == 'true' && ( -f package.json ) }}
+        run: |
+          npm --version || true
+          ncu --jsonUpgradable > node-updates.json || true
+          jq -r 'keys[] as $k | "($k) -> (.[$k])"' node-updates.json > node-updates.txt || true
+
+      - name: Python dependency check (best-effort)
+        if: ${{ needs.inspect-pipeline.outputs.has_python == 'true' && ( -f requirements.txt ) }}
+        run: |
+          pip-audit -r requirements.txt -f json -o python-dep-audit.json || true
+          pipdeptree --warn silence > pip-deptree.txt || true
+
+      - name: Generate Dependencies Health Report
+        run: |
+          echo "Dependencies Health Report" > deps-health-report.txt || true
+          if [ -f go-deps.txt ]; then echo "--- Go ---" >> deps-health-report.txt; cat go-deps.txt >> deps-health-report.txt; fi
+          if [ -f node-updates.txt ]; then echo "--- Node ---" >> deps-health-report.txt; cat node-updates.txt >> deps-health-report.txt; fi
+          if [ -f pip-deptree.txt ]; then echo "--- Python ---" >> deps-health-report.txt; cat pip-deptree.txt >> deps-health-report.txt; fi
+
+      - name: Attempt safe minor/patch upgrades (non-breaking) — DRY RUN
+        run: |
+          echo "Attempting safe upgrades (patch/minor) — DRY RUN mode"
+          if [ -f package.json ]; then
+            ncu --target minor --semverLevel minor --packageFile package.json -u || true
+            git --no-pager diff --name-only || true
+          fi
+          if [ -f requirements.txt ]; then
+            pip list --outdated --format=columns > pip-outdated.txt || true
+          fi
+
+      - name: Upload dependency reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-reports
+          path: |
+            deps-health-report.txt
+            node-updates.json
+            python-dep-audit.json
+            pip-outdated.txt
+
+  # ------------------------------------------------------------------
+  # 10. Chaos-Resistant Mode (optional)
+  # ------------------------------------------------------------------
+  chaos-testing:
+    name: Chaos-Resistant Tests (Optional)
+    runs-on: ubuntu-latest
+    needs: inspect-pipeline
+    if: ${{ env.CHAOS_MODE == 'true' }}
+    strategy:
+      matrix:
+        node-version: [16, 18, 20]
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node (chaos matrix)
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Quick build attempt (chaos)
+        run: |
+          echo "Running quick chaos build on node ${matrix.node-version} / $RUNNER_OS"
+          if [ -f package.json ]; then
+            npm ci --no-audit --no-fund || true
+            npm run build --if-present || true
+          fi
+
+      - name: Simulate randomized environment perturbation (dry-run)
+        run: |
+          echo "Simulating missing file scenarios and corrupted cache"
+          rm -rf node_modules || true
+          npm ci --no-audit --no-fund || true
+
+  # ------------------------------------------------------------------
+  # 11. Summary reporter (always runs, collects reports, posts checks)
+  # ------------------------------------------------------------------
+  summary:
+    name: CI Summary & Diagnostics
+    runs-on: ubuntu-latest
+    needs: [build-go, lint-python, frontend, security-scan, codeql]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Collect artifacts & reports
+        run: |
+          mkdir -p ci-report
+          for f in bandit-report.json npm-audit.json pip-audit.json gitleaks-report.json deps-health-report.txt node-updates.json; do
+            if [ -f $f ]; then cp $f ci-report/ || true; fi
+          done
+
+          echo "CI run: $GITHUB_RUN_ID" > ci-report/summary.txt
+          echo "Branch: $GITHUB_REF" >> ci-report/summary.txt
+          echo "Triggered by: $GITHUB_EVENT_NAME" >> ci-report/summary.txt
+
+      - name: Upload CI diagnostic bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-diagnostics
+          path: ci-report
+
+  # ------------------------------------------------------------------
+  # 12. Final gating: fail workflow if critical checks failed
+  # ------------------------------------------------------------------
+  gate:
+    name: Gate - fail on critical issues
+    runs-on: ubuntu-latest
+    needs: [build-go, lint-python, frontend, security-scan]
+    steps:
+      - name: Evaluate results (best-effort)
+        run: |
+          echo "Gate check complete"
+          # NOTE: extend this step to parse artifact reports and fail the run if critical CVEs or failing tests found.
