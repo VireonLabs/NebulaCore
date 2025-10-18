@@ -15,7 +15,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: nebula-ci-${{ github.ref }}
@@ -25,9 +24,6 @@ env:
   GO_VERSION: "1.20"
   PYTHON_VERSION: "3.11"
   NODE_VERSION: "18"
-  PIP_CACHE_KEY: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-  GO_CACHE_KEY: ${{ runner.os }}-go-mod-${{ hashFiles('**/go.sum') }}
-  NPM_CACHE_KEY: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
   CHAOS_MODE: "false"
   ARTIFACT_ENCRYPTION_KEY: ${{ secrets.ARTIFACT_ENCRYPTION_KEY }}
   AUTO_PR_ON_MAIN: "true"
@@ -44,7 +40,7 @@ jobs:
       has_web: ${{ steps.detect.outputs.has_web }}
       has_tests: ${{ steps.detect.outputs.has_tests }}
       has_dockerfile: ${{ steps.detect.outputs.has_dockerfile }}
-      wants_chaos: ${{ env.CHAOS_MODE }}
+      wants_chaos: ${{ steps.detect.outputs.wants_chaos }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -67,6 +63,7 @@ jobs:
           echo "has_web=$has_web" >> $GITHUB_OUTPUT
           echo "has_tests=$has_tests" >> $GITHUB_OUTPUT
           echo "has_dockerfile=$has_dockerfile" >> $GITHUB_OUTPUT
+          echo "wants_chaos=${CHAOS_MODE}" >> $GITHUB_OUTPUT
           echo "Done inspector. CHAOS_MODE=${CHAOS_MODE}"
 
       - name: Dump quick manifest (artifact)
@@ -91,6 +88,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: inspect-pipeline
     if: ${{ needs.inspect-pipeline.outputs.has_go == 'true' }}
+    env:
+      GO_CACHE_KEY: ${{ runner.os }}-go-mod-${{ hashFiles('**/go.sum') }}
+      GO_VERSION: ${{ env.GO_VERSION }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -185,6 +185,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: inspect-pipeline
     if: ${{ needs.inspect-pipeline.outputs.has_python == 'true' }}
+    env:
+      PIP_CACHE_KEY: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+      PYTHON_VERSION: ${{ env.PYTHON_VERSION }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -211,7 +214,6 @@ jobs:
           set -e
           flake8 || true
           if ! flake8 >/dev/null 2>&1; then
-            echo "flake8 issues found — attempting auto-format and regenerating requirements if needed"
             black . || true
             pipreqs --force . || true
           fi
@@ -242,6 +244,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: inspect-pipeline
     if: ${{ needs.inspect-pipeline.outputs.has_web == 'true' || needs.inspect-pipeline.outputs.has_node == 'true' }}
+    env:
+      NPM_CACHE_KEY: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
+      NODE_VERSION: ${{ env.NODE_VERSION }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -270,7 +275,6 @@ jobs:
               if npm ci --no-audit --no-fund 2>&1 | tee ../npm-install.log; then
                 break
               else
-                echo "npm ci failed; running diagnostic and best-effort heals"
                 tail -n 200 ../npm-install.log || true
                 npm cache clean --force || true
                 rm -rf node_modules package-lock.json || true
@@ -326,7 +330,7 @@ jobs:
 
       - name: Trivy container scan (if Dockerfile exists)
         if: ${{ needs.inspect-pipeline.outputs.has_dockerfile == 'true' }}
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@v1
         with:
           scan-type: filesystem
           scan-ref: .
@@ -404,6 +408,8 @@ jobs:
     needs: inspect-pipeline
     permissions:
       contents: write
+    env:
+      PYTHON_VERSION: ${{ env.PYTHON_VERSION }}
     steps:
       - name: Checkout (full history)
         uses: actions/checkout@v4
@@ -414,7 +420,7 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-
+          
       - name: Install autoformatters
         run: |
           python -m pip install --upgrade pip || true
@@ -428,7 +434,6 @@ jobs:
           isort . || true
           autoflake --remove-all-unused-imports --in-place --recursive . || true
           if [ ! -f requirements.txt ] || ! python -m pip install -r requirements.txt >/dev/null 2>&1; then
-            echo "Regenerating requirements.txt مع pipreqs (best-effort)"
             pipreqs --force . || true
           fi
           git status --porcelain || true
@@ -507,12 +512,22 @@ jobs:
     name: Dependency Doctor & Health Report
     runs-on: ubuntu-latest
     needs: inspect-pipeline
+    env:
+      GO_CACHE_KEY: ${{ runner.os }}-go-mod-${{ hashFiles('**/go.sum') }}
+      PIP_CACHE_KEY: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+      NPM_CACHE_KEY: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node (for ncu)
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
       - name: Install inspector tools
         run: |
+          sudo apt-get update && sudo apt-get install -y jq || true
           python -m pip install --upgrade pip || true
           pip install pipdeptree safety pip-audit || true
           npm install -g npm-check-updates || true
@@ -573,7 +588,7 @@ jobs:
     name: Chaos-Resistant Tests (Optional)
     runs-on: ubuntu-latest
     needs: inspect-pipeline
-    if: ${{ env.CHAOS_MODE == 'true' }}
+    if: ${{ needs.inspect-pipeline.outputs.wants_chaos == 'true' }}
     strategy:
       matrix:
         node-version: [16, 18, 20]
@@ -636,4 +651,4 @@ jobs:
       - name: Evaluate results (best-effort)
         run: |
           echo "Gate check complete"
-          # NOTE: extend this step to parse artifact reports and fail the run if critical CVEs or failing tests found.
+          
