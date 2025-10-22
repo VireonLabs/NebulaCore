@@ -112,10 +112,10 @@ type AckSample struct {
 
 // TaskDesc: for placement decisions
 type TaskDesc struct {
-	TaskID string
-	Size   int64
+	TaskID   string
+	Size     int64
 	Priority int
-	Meta   map[string]any
+	Meta     map[string]any
 }
 
 // ---- Endpoint, Link, Registry ----
@@ -166,7 +166,9 @@ func (r *RDMAConnStub) SendChunks(ctx context.Context, chunks [][]byte) error {
 	}
 	return nil
 }
+
 func (r *RDMAConnStub) RecvChunks(ctx context.Context) ([][]byte, error) { return nil, nil }
+
 func (r *RDMAConnStub) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -260,8 +262,8 @@ func (t *TCPFastConn) Close() error {
 	return t.conn.Close()
 }
 
-func (t *TCPFastConn) Kind() TransportKind { return TransportTCP }
-func (t *TCPFastConn) Metrics() TransportMetrics { return t.metrics }
+func (t *TCPFastConn) Kind() TransportKind                 { return TransportTCP }
+func (t *TCPFastConn) Metrics() TransportMetrics           { return t.metrics }
 
 // QUICConn: modern multipath QUIC transport (uses quic-go)
 type QUICConn struct {
@@ -296,7 +298,7 @@ func (q *QUICConn) SendChunks(ctx context.Context, chunks [][]byte) error {
 func (q *QUICConn) RecvChunks(ctx context.Context) ([][]byte, error) {
 	buf := make([]byte, 256*1024)
 	var out [][]byte
-	q.stream.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	_ = q.stream.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 	n, err := q.stream.Read(buf)
 	if err != nil {
 		if ne, ok := err.(net.Error); ok && ne.Timeout() {
@@ -317,31 +319,34 @@ func (q *QUICConn) Close() error {
 		return nil
 	}
 	q.closed = true
-	q.stream.Close()
+	_ = q.stream.Close()
 	return q.session.CloseWithError(0, "closed")
 }
 
-func (q *QUICConn) Kind() TransportKind { return TransportQUIC }
-func (q *QUICConn) Metrics() TransportMetrics { return q.metrics }
+func (q *QUICConn) Kind() TransportKind                 { return TransportQUIC }
+func (q *QUICConn) Metrics() TransportMetrics           { return q.metrics }
 
 // WritevConn: kernel-bypass/zero-copy using writev (net.Buffers)
 type WritevConn struct {
-	conn net.Conn
+	conn    net.Conn
 	metrics TransportMetrics
 }
 
 func (w *WritevConn) SendChunks(ctx context.Context, chunks [][]byte) error {
 	var bufs net.Buffers
-	for _, c := range chunks { bufs = append(bufs, c) }
+	for _, c := range chunks {
+		bufs = append(bufs, c)
+	}
 	_, err := bufs.WriteTo(w.conn)
 	w.metrics.BytesSent += int64(bufs.Len())
 	w.metrics.LastUpdate = time.Now()
 	return err
 }
+
 func (w *WritevConn) RecvChunks(ctx context.Context) ([][]byte, error) {
 	buf := make([]byte, 256*1024)
 	var out [][]byte
-	w.conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	_ = w.conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 	n, err := w.conn.Read(buf)
 	if err != nil {
 		return out, err
@@ -351,9 +356,10 @@ func (w *WritevConn) RecvChunks(ctx context.Context) ([][]byte, error) {
 	w.metrics.LastUpdate = time.Now()
 	return out, nil
 }
-func (w *WritevConn) Close() error { return w.conn.Close() }
-func (w *WritevConn) Kind() TransportKind { return TransportXDP }
-func (w *WritevConn) Metrics() TransportMetrics { return w.metrics }
+
+func (w *WritevConn) Close() error                           { return w.conn.Close() }
+func (w *WritevConn) Kind() TransportKind                    { return TransportXDP }
+func (w *WritevConn) Metrics() TransportMetrics              { return w.metrics }
 
 // GPUMemTransport: stub for GPU direct
 type GPUMemTransport struct {
@@ -389,32 +395,59 @@ func (s *sharedConn) acquire() bool {
 	s.lastUsed = time.Now()
 	return true
 }
+
 func (s *sharedConn) SendChunks(ctx context.Context, chunks [][]byte) error {
-	if atomic.LoadUint32(&s.closed) == 1 { return errors.New("sharedConn closed") }
+	if atomic.LoadUint32(&s.closed) == 1 {
+		return errors.New("sharedConn closed")
+	}
 	s.mu.RLock()
-	if atomic.LoadUint32(&s.closed) == 1 { s.mu.RUnlock(); return errors.New("sharedConn closed") }
-	s.innerMu.Lock(); s.lastUsed = time.Now(); s.innerMu.Unlock()
+	if atomic.LoadUint32(&s.closed) == 1 {
+		s.mu.RUnlock()
+		return errors.New("sharedConn closed")
+	}
+	s.innerMu.Lock()
+	s.lastUsed = time.Now()
+	s.innerMu.Unlock()
 	err := s.inner.SendChunks(ctx, chunks)
 	s.mu.RUnlock()
 	return err
 }
+
 func (s *sharedConn) RecvChunks(ctx context.Context) ([][]byte, error) {
-	if atomic.LoadUint32(&s.closed) == 1 { return nil, errors.New("sharedConn closed") }
+	if atomic.LoadUint32(&s.closed) == 1 {
+		return nil, errors.New("sharedConn closed")
+	}
 	s.mu.RLock()
-	if atomic.LoadUint32(&s.closed) == 1 { s.mu.RUnlock(); return nil, errors.New("sharedConn closed") }
-	s.innerMu.Lock(); s.lastUsed = time.Now(); s.innerMu.Unlock()
+	if atomic.LoadUint32(&s.closed) == 1 {
+		s.mu.RUnlock()
+		return nil, errors.New("sharedConn closed")
+	}
+	s.innerMu.Lock()
+	s.lastUsed = time.Now()
+	s.innerMu.Unlock()
 	out, err := s.inner.RecvChunks(ctx)
 	s.mu.RUnlock()
 	return out, err
 }
+
 func (s *sharedConn) Close() error {
 	s.innerMu.Lock()
-	if s.refs > 0 { s.refs-- } else { s.innerMu.Unlock(); return nil }
+	if s.refs > 0 {
+		s.refs--
+	} else {
+		s.innerMu.Unlock()
+		return nil
+	}
 	shouldClose := s.refs == 0
 	s.innerMu.Unlock()
-	if !shouldClose { return nil }
+	if !shouldClose {
+		return nil
+	}
 	s.mu.Lock()
-	if atomic.LoadUint32(&s.closed) == 1 { s.mu.Unlock(); return nil }
+	if atomic.LoadUint32(&s.closed) == 1 {
+		s.mu.Unlock()
+		return nil
+	}
 	atomic.StoreUint32(&s.closed, 1)
 	s.mu.Unlock()
 	err := s.inner.Close()
@@ -466,7 +499,7 @@ type PrewarmAgent interface {
 }
 
 func NewRDMAManager(storeDir string) *RDMAManager {
-	_ = os.MkdirAll(storeDir, 0o750)
+	_ = os.MkdirAll(storeDir, 0750)
 	pool := &sync.Pool{New: func() any { return make([]byte, 256*1024) }}
 	rm := &RDMAManager{
 		endpoints:      map[string]RDMAEndpoint{},
@@ -718,7 +751,10 @@ func (rm *RDMAManager) SendHedge(ctx context.Context, nodeIDs []string, chunks [
 		go func(n string) {
 			defer wg.Done()
 			fc, err := rm.DialWithOptions(ctx, n, opts)
-			if err != nil { errCh <- err; return }
+			if err != nil {
+				errCh <- err
+				return
+			}
 			defer fc.Close()
 			if err := fc.SendChunks(ctx, chunks); err != nil {
 				errCh <- err
@@ -755,7 +791,7 @@ func (rm *RDMAManager) SendLarge(ctx context.Context, nodeID string, r io.Reader
 	}
 	defer fc.Close()
 
-	type chunk struct { data []byte; err error }
+	type chunk struct{ data []byte; err error }
 	chSrc := make(chan chunk, parallel*2)
 	var wg sync.WaitGroup
 	errCh := make(chan error, 1)
@@ -768,12 +804,18 @@ func (rm *RDMAManager) SendLarge(ctx context.Context, nodeID string, r io.Reader
 			defer wg.Done()
 			for c := range chSrc {
 				if c.err != nil {
-					select { case errCh <- c.err: default: }
+					select {
+					case errCh <- c.err:
+					default:
+					}
 					cancelSend()
 					continue
 				}
 				if sendErr := fc.SendChunks(ctxSend, [][]byte{c.data}); sendErr != nil {
-					select { case errCh <- sendErr: default: }
+					select {
+					case errCh <- sendErr:
+					default:
+					}
 					cancelSend()
 					return
 				}
@@ -789,7 +831,7 @@ func (rm *RDMAManager) SendLarge(ctx context.Context, nodeID string, r io.Reader
 		}()
 	}
 	bufPool := rm.pool
-	readLoop:
+readLoop:
 	for {
 		select {
 		case <-ctxSend.Done():
@@ -803,21 +845,37 @@ func (rm *RDMAManager) SendLarge(ctx context.Context, nodeID string, r io.Reader
 		}
 		n, rerr := r.Read(buf[:readSize])
 		if rerr != nil && rerr != io.EOF {
-			select { case errCh <- rerr: default: }
+			select {
+			case errCh <- rerr:
+			default:
+			}
 			bufPool.Put(buf)
 			break
 		}
-		if n == 0 { bufPool.Put(buf); break }
-		data := make([]byte, n); copy(data, buf[:n]); bufPool.Put(buf)
+		if n == 0 {
+			bufPool.Put(buf)
+			break
+		}
+		data := make([]byte, n)
+		copy(data, buf[:n])
+		bufPool.Put(buf)
 		select {
 		case chSrc <- chunk{data: data, err: nil}:
-		case <-ctxSend.Done(): break readLoop
+		case <-ctxSend.Done():
+			break readLoop
 		}
-		if rerr == io.EOF { break }
+		if rerr == io.EOF {
+			break
+		}
 	}
 	close(chSrc)
 	wg.Wait()
-	select { case e := <-errCh: return e; default: return nil }
+	select {
+	case e := <-errCh:
+		return e
+	default:
+		return nil
+	}
 }
 
 // ---- Probe, Routing, Telemetry ----
@@ -890,23 +948,23 @@ func (rm *RDMAManager) ModuleMeta() ModuleInfo {
 
 func (rm *RDMAManager) ExposeFunctions() map[string]any {
 	return map[string]any{
-		"register_endpoint":  rm.RegisterEndpoint,
-		"list_endpoints":     rm.ListEndpoints,
-		"dial":               rm.Dial,
-		"dial_with_options":  rm.DialWithOptions,
-		"send_large":         rm.SendLarge,
-		"send_hedge":         rm.SendHedge,
-		"probe":              rm.Probe,
-		"suggest_route":      rm.SuggestRoute,
-		"get_health":         rm.GetHealth,
-		"register_telemetry": rm.RegisterTelemetry,
-		"close_conn":         rm.CloseConn,
-		"shutdown":           rm.Shutdown,
-		"set_framing":        rm.SetFraming,
-		"enable_kernel_bypass": rm.EnableKernelBypass,
-		"set_placement_agent":  rm.SetPlacementAgent,
-		"set_congestion_controller": rm.SetCongestionController,
-		"prewarm":            rm.Prewarm,
+		"register_endpoint":            rm.RegisterEndpoint,
+		"list_endpoints":               rm.ListEndpoints,
+		"dial":                         rm.Dial,
+		"dial_with_options":            rm.DialWithOptions,
+		"send_large":                   rm.SendLarge,
+		"send_hedge":                   rm.SendHedge,
+		"probe":                        rm.Probe,
+		"suggest_route":                rm.SuggestRoute,
+		"get_health":                   rm.GetHealth,
+		"register_telemetry":           rm.RegisterTelemetry,
+		"close_conn":                   rm.CloseConn,
+		"shutdown":                     rm.Shutdown,
+		"set_framing":                  rm.SetFraming,
+		"enable_kernel_bypass":         rm.EnableKernelBypass,
+		"set_placement_agent":          rm.SetPlacementAgent,
+		"set_congestion_controller":    rm.SetCongestionController,
+		"prewarm":                      rm.Prewarm,
 	}
 }
 
@@ -914,6 +972,6 @@ func (rm *RDMAManager) ExposeFunctions() map[string]any {
 
 func randomID() string {
 	var b [8]byte
-	rand.Read(b[:])
+	_, _ = rand.Read(b[:])
 	return fmt.Sprintf("%x", b[:])
 }
