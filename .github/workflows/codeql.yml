@@ -1,96 +1,79 @@
-CodeQL analysis (modern, production-ready)
-
-- Uses CodeQL Action v3
-
-- Permissions set to allow uploading security events
-
-- Supports Go and JavaScript (adjust "languages" as needed)
-
-- Caches Go modules to speedup runs
-
-- Runs on push, pull_request and weekly schedule
-
 name: "CodeQL Security Scan"
 
-Top-level permissions required for CodeQL to push security results
-
+# Top-level permissions required for CodeQL to push security results
 permissions:
-actions: read
-contents: read
-security-events: write
+  actions: read
+  contents: read
+  security-events: write
 
 on:
-push:
-branches: ["main", "master"]
-pull_request:
-branches: ["main", "master"]
-schedule:
-- cron: '0 3 * * 0' # weekly (UTC) every Sunday 03:00
-workflow_dispatch:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+    branches: ["main", "master"]
+  schedule:
+    - cron: '0 3 * * 0' # weekly (UTC) every Sunday 03:00
+  workflow_dispatch:
 
 concurrency:
-group: "codeql-scan-${{ github.ref }}"
-cancel-in-progress: true
+  group: "codeql-scan-${{ github.ref }}"
+  cancel-in-progress: true
 
 jobs:
-codeql-scan:
-name: CodeQL Analysis
-runs-on: ubuntu-latest
-# extra protection: reduce runs on forks if desired (optional)
-# if: github.event.pull_request == null || github.event.pull_request.head.repo.full_name == github.repository
+  codeql-scan:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
 
-steps:  
-  - name: Checkout repository  
-    uses: actions/checkout@v4  
-    with:  
-      fetch-depth: 0  
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-  - name: Setup Go cache  
-    if: runner.os == 'Linux'  
-    uses: actions/cache@v4  
-    with:  
-      path: |  
-        ~/.cache/go-build  
-        ~/go/pkg/mod  
-      key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}  
-      restore-keys: |  
-        ${{ runner.os }}-go-  
+      - name: Setup Go cache
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
 
-  - name: Ensure Go modules are present (non-failing)  
-    # Attempt to prepare Go modules if repo contains go.mod  
-    run: |  
-      if [ -f go.mod ]; then  
-        echo "Found go.mod — running 'go mod tidy' and 'go mod download'"  
-        go mod tidy  
-        go mod download  
-      else  
-        echo "No go.mod found in repo root — skipping Go module setup"  
-      fi  
+      - name: Ensure Go modules are present (non-failing)
+        # Attempt to prepare Go modules if repo contains go.mod — this will create/update go.sum
+        run: |
+          if [ -f go.mod ]; then
+            echo "Found go.mod — running 'go mod tidy' and 'go mod download'"
+            go mod tidy
+            go mod download
+          else
+            echo "No go.mod found in repo root — skipping Go module setup"
+          fi
 
-  - name: Initialize CodeQL  
-    uses: github/codeql-action/init@v3  
-    with:  
-      # adjust languages to your repo. Keep minimal to reduce noise.  
-      languages: go, javascript  
-      # optional: specify a config file  
-      # config-file: .github/codeql/codeql-config.yml  
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          # adjust languages to your repo. Keep minimal to reduce noise.
+          languages: go, javascript
+          # optional: specify a config file
+          # config-file: .github/codeql/codeql-config.yml
 
-  - name: Autobuild (CodeQL)  
-    uses: github/codeql-action/autobuild@v3  
-    # autobuild will attempt language-specific build steps. For Go, ensure modules are ready.  
+      - name: Autobuild (CodeQL)
+        uses: github/codeql-action/autobuild@v3
+        # autobuild will attempt language-specific build steps. For Go, ensure modules are ready.
 
-  - name: Run CodeQL database creation and analysis  
-    uses: github/codeql-action/analyze@v3  
-    with:  
-      # upload results in SARIF to the security tab automatically  
-      # additional options can be added here if needed  
-      category: "security"  
+      - name: Run CodeQL database creation and analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "security"
 
-  - name: Upload CodeQL logs (artifact)  
-    if: always()  
-    uses: actions/upload-artifact@v4  
-    with:  
-      name: codeql-logs-${{ github.run_id }}  
-      path: |  
-        ${{ github.workspace }}/codeql* || true  
-        ${{ github.workspace }}/.github/codeql || true
+      - name: Upload CodeQL logs (artifact)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codeql-logs-${{ github.run_id }}
+          path: |
+            ${{ github.workspace }}/codeql* || true
+            ${{ github.workspace }}/.github/codeql || true
