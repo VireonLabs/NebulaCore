@@ -559,7 +559,7 @@ jobs:
           if [ -f node-updates.txt ]; then echo "--- Node ---" >> deps-health-report.txt; cat node-updates.txt >> deps-health-report.txt; fi
           if [ -f pip-deptree.txt ]; then echo "--- Python ---" >> deps-health-report.txt; cat pip-deptree.txt >> deps-health-report.txt; fi
 
-      - name: Attempt safe minor/patch upgrades (non-breaking) — DRY RUN
+      - name: Attempt safe minor/patch upgrades (DRY RUN)
         run: |
           echo "Attempting safe upgrades (patch/minor) — DRY RUN mode"
           if [ -f package.json ]; then
@@ -580,6 +580,130 @@ jobs:
             python-dep-audit.json
             pip-outdated.txt
           if-no-files-found: ignore
+
+  # ---------------------------
+  # NEW JOB: persist-locks
+  # - will generate go.sum and package-lock.json if missing
+  # - commit & push changes directly to the same branch (uses contents: write)
+  # ---------------------------
+  persist-locks:
+    name: Persist generated lock files (go.sum & package-lock.json) (direct push)
+    runs-on: ubuntu-latest
+    needs: [build-go, frontend]
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout (full)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go (for generation)
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Setup Node (for package-lock generation)
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Generate missing lock files (go.sum, package-lock.json)
+        id: gen_locks
+        run: |
+          echo "Detecting and generating missing lock files..."
+          CHANGED=false
+
+          # Generate go.sum if go.mod exists and go.sum missing or empty
+          if [ -f go.mod ]; then
+            if [ ! -f go.sum ] || [ ! -s go.sum ]; then
+              echo "go.mod present but go.sum missing or empty. Running 'go mod tidy' and 'go mod download'..."
+              go mod tidy || true
+              go mod download || true
+              CHANGED=true
+            else
+              echo "go.sum already present."
+            fi
+          fi
+
+          # Helper to try creating package-lock.json inside a folder
+          create_pkg_lock() {
+            local dir="$1"
+            if [ -f "$dir/package.json" ]; then
+              if [ ! -f "$dir/package-lock.json" ] || [ ! -s "$dir/package-lock.json" ]; then
+                echo "Creating package-lock.json in $dir"
+                pushd "$dir" >/dev/null 2>&1 || return 0
+                # Use package-lock-only to avoid installing node_modules
+                npm install --package-lock-only --no-audit --no-fund || true
+                popd >/dev/null 2>&1 || true
+                CHANGED=true
+              else
+                echo "package-lock.json exists in $dir"
+              fi
+            fi
+          }
+
+          # Create lock for web/ if exists
+          create_pkg_lock "web"
+
+          # Create lock for root package.json if exists
+          create_pkg_lock "."
+
+          # Emit result
+          echo "CHANGED=${CHANGED}" >> $GITHUB_OUTPUT
+          if [ "$CHANGED" = "true" ]; then
+            echo "Some lock files were generated or updated."
+          else
+            echo "No changes required for lock files."
+          fi
+
+      - name: Show repo status (after generation)
+        run: |
+          echo "=== git status after generation ==="
+          git status --porcelain || true
+          git ls-files --deleted --modified --others --exclude-standard || true
+
+      - name: Commit & push generated lock files back to the current branch
+        run: |
+          # Only proceed if there are changes
+          if git diff --quiet && git diff --staged --quiet; then
+            echo "No generated files to commit. Skipping push."
+            exit 0
+          fi
+
+          # Configure git author
+          git config user.name "nebula-ci-bot"
+          git config user.email "nebula-ci-bot@users.noreply.github.com"
+
+          # Stage typical lock files (adjust if you have other paths)
+          if [ -f go.sum ]; then git add go.sum || true; fi
+          if [ -f package-lock.json ]; then git add package-lock.json || true; fi
+          if [ -f web/package-lock.json ]; then git add web/package-lock.json || true; fi
+
+          # If nothing staged, exit
+          if git diff --staged --quiet; then
+            echo "No staged lock files to commit after checks."
+            exit 0
+          fi
+
+          git commit -m "ci(auto): add/update generated lock files (go.sum, package-lock.json)" || true
+
+          # Determine branch name
+          BRANCH="$(echo "${GITHUB_REF}" | sed 's#refs/heads/##')"
+          echo "Attempting to push commits to branch: $BRANCH"
+
+          # Push using token (will fail if branch protected or permissions restricted)
+          git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" "HEAD:${BRANCH}" || {
+            echo "::warning::Push failed. This may be due to branch protection rules or insufficient token permissions."
+            echo "If push failed, the generated files remain on the runner. You can download them from job logs or modify this job to upload them as artifacts or create a PR instead."
+            exit 0
+          }
+
+      - name: Confirm pushed files
+        run: |
+          echo "After push, printing git status and last commit"
+          git log -n 3 --pretty=oneline || true
+          git status --porcelain || true
 
   chaos-testing:
     name: Chaos-Resistant Tests (Optional)
@@ -648,4 +772,3 @@ jobs:
       - name: Evaluate results (best-effort)
         run: |
           echo "Gate check complete"
-          
