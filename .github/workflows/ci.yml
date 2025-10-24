@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  security-events: write
 
 concurrency:
   group: nebula-ci-${{ github.ref }}
@@ -48,7 +49,6 @@ jobs:
       - name: Detect project layout & create AI-ready hooks folder
         id: detect
         run: |
-          echo "Inspecting repository layout..."
           has_go=false; has_python=false; has_node=false; has_web=false; has_tests=false; has_dockerfile=false
           if [ -f go.mod ] || git ls-files '*.go' | grep -q .; then has_go=true; fi
           if [ -f requirements.txt ] || git ls-files '*.py' | grep -q .; then has_python=true; fi
@@ -64,7 +64,6 @@ jobs:
           echo "has_tests=$has_tests" >> $GITHUB_OUTPUT
           echo "has_dockerfile=$has_dockerfile" >> $GITHUB_OUTPUT
           echo "wants_chaos=${CHAOS_MODE}" >> $GITHUB_OUTPUT
-          echo "Done inspector. CHAOS_MODE=${CHAOS_MODE}"
 
       - name: Dump quick manifest (artifact)
         run: |
@@ -108,11 +107,8 @@ jobs:
       - name: Ensure Go modules are present (non-failing)
         run: |
           if [ -f go.mod ]; then
-            echo "Found go.mod — running 'go mod tidy' and 'go mod download'"
             go mod tidy
             go mod download
-          else
-            echo "No go.mod found in repo root — skipping Go module setup"
           fi
 
       - name: Ensure formatting & vet
@@ -132,38 +128,29 @@ jobs:
           function snapshot {
             echo "=== DIAGNOSTIC SNAPSHOT ===" > snapshot.txt
             echo "GOVERSION: $(go version)" >> snapshot.txt || true
-            echo "GO ENV:" >> snapshot.txt
             go env >> snapshot.txt || true
-            echo "Last 500 lines from $LOGFILE" >> snapshot.txt
             tail -n 500 $LOGFILE >> snapshot.txt || true
             tar -czf go-test-snapshot.tgz snapshot.txt || true
           }
           attempt=1
           max_attempts=3
           while [ $attempt -le $max_attempts ]; do
-            echo "Attempt #$attempt running go test..."
             if go test ./... -short -count=1 2>&1 | tee $LOGFILE; then
-              echo "go test succeeded on attempt #$attempt"
               exit 0
             else
-              echo "go test failed on attempt #$attempt, running diagnostics"
               snapshot
               if grep -q "no required module provides package" $LOGFILE || grep -q "cannot find module" $LOGFILE; then
-                echo "Detected missing module — attempting 'go get ./...' and retry"
                 go get ./... || true
               fi
               if grep -q "module requires" $LOGFILE || grep -q "found module" $LOGFILE; then
-                echo "Module mismatch detected - running 'go mod tidy'"
                 go mod tidy || true
               fi
               if [ $attempt -lt $max_attempts ]; then
-                echo "Cleaning go cache and retrying..."
                 go clean -modcache || true
               fi
             fi
             attempt=$((attempt+1))
           done
-          echo "go test failed after $max_attempts attempts, uploading snapshot"
           ls -lh go-test-snapshot.tgz || true
           exit 1
 
@@ -262,24 +249,23 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.npm
-          key: npm-${{ hashFiles('**/package-lock.json') }}
+          key: npm-${{ hashFiles('web/**/package-lock.json') }}
 
       - name: Install frontend deps (if web/package.json exists) with self-heal
         id: frontend-install
+        working-directory: ./web
         run: |
           set -e
-          if [ -f web/package.json ]; then
-            cd web
+          if [ -f package.json ]; then
             attempt=1; max_attempts=3
             while [ $attempt -le $max_attempts ]; do
-              echo "npm ci attempt #$attempt"
               if npm ci --no-audit --no-fund 2>&1 | tee ../npm-install.log; then
                 break
               else
                 tail -n 200 ../npm-install.log || true
                 npm cache clean --force || true
                 rm -rf node_modules package-lock.json || true
-                if [ -f package.json ]; then npm i --package-lock-only || true; fi
+                if [ -f package.json ]; then npm i --package-lock-only --legacy-peer-deps || true; fi
               fi
               attempt=$((attempt+1))
             done
@@ -287,9 +273,9 @@ jobs:
           fi
 
       - name: NPM audit (report)
+        working-directory: ./web
         run: |
-          if [ -f web/package.json ]; then
-            cd web
+          if [ -f package.json ]; then
             npm audit --json > ../npm-audit.json || true
           fi
 
@@ -331,7 +317,7 @@ jobs:
 
       - name: Trivy container scan (if Dockerfile exists)
         if: ${{ needs.inspect-pipeline.outputs.has_dockerfile == 'true' }}
-        uses: aquasecurity/trivy-action@v0.33.1
+        uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'fs'
           ignore-unfixed: true
@@ -339,6 +325,7 @@ jobs:
           exit-code: '1'
           vuln-type: 'os,library'
           security-checks: 'vuln,secret'
+          output: 'security-reports/trivy-report.txt'
 
       - name: Run gitleaks secret scan
         run: |
@@ -356,6 +343,7 @@ jobs:
           name: security-reports
           path: |
             gitleaks-report.json
+            security-reports/trivy-report.txt
           if-no-files-found: ignore
 
   autofix-go:
@@ -380,7 +368,6 @@ jobs:
         id: go-fix
         run: |
           set -e
-          echo "Running go mod tidy & fmt"
           go mod tidy || true
           go fmt ./... || true
           go vet ./... || true
@@ -417,7 +404,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
+          
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
@@ -447,17 +434,7 @@ jobs:
           branch: ${{ github.head_ref || github.ref_name }}
           author_name: "nebula-ci-bot"
           author_email: "nebula-ci-bot@users.noreply.github.com"
-      - name: Create PR if on protected branch (Main) and AUTO_PR_ON_MAIN enabled
-        if: ${{ github.ref == 'refs/heads/main' && env.AUTO_PR_ON_MAIN == 'true' }}
-        uses: peter-evans/create-pull-request@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "ci(auto): python formatting & dependency fixes"
-          title: "ci(auto): python formatting & dependency fixes"
-          body: "Automated Python formatting & dependency fixes from NebulaCore CI."
-          base: main
-          branch: fix/nebulaci/python-fixes-${{ github.run_id }}
-          
+
   codeql:
     name: CodeQL Analysis
     runs-on: ubuntu-latest
@@ -561,7 +538,6 @@ jobs:
 
       - name: Attempt safe minor/patch upgrades (DRY RUN)
         run: |
-          echo "Attempting safe upgrades (patch/minor) — DRY RUN mode"
           if [ -f package.json ]; then
             ncu --target minor --semverLevel minor --packageFile package.json -u || true
             git --no-pager diff --name-only || true
@@ -580,130 +556,6 @@ jobs:
             python-dep-audit.json
             pip-outdated.txt
           if-no-files-found: ignore
-
-  # ---------------------------
-  # NEW JOB: persist-locks
-  # - will generate go.sum and package-lock.json if missing
-  # - commit & push changes directly to the same branch (uses contents: write)
-  # ---------------------------
-  persist-locks:
-    name: Persist generated lock files (go.sum & package-lock.json) (direct push)
-    runs-on: ubuntu-latest
-    needs: [build-go, frontend]
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout (full)
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Go (for generation)
-        uses: actions/setup-go@v4
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
-      - name: Setup Node (for package-lock generation)
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Generate missing lock files (go.sum, package-lock.json)
-        id: gen_locks
-        run: |
-          echo "Detecting and generating missing lock files..."
-          CHANGED=false
-
-          # Generate go.sum if go.mod exists and go.sum missing or empty
-          if [ -f go.mod ]; then
-            if [ ! -f go.sum ] || [ ! -s go.sum ]; then
-              echo "go.mod present but go.sum missing or empty. Running 'go mod tidy' and 'go mod download'..."
-              go mod tidy || true
-              go mod download || true
-              CHANGED=true
-            else
-              echo "go.sum already present."
-            fi
-          fi
-
-          # Helper to try creating package-lock.json inside a folder
-          create_pkg_lock() {
-            local dir="$1"
-            if [ -f "$dir/package.json" ]; then
-              if [ ! -f "$dir/package-lock.json" ] || [ ! -s "$dir/package-lock.json" ]; then
-                echo "Creating package-lock.json in $dir"
-                pushd "$dir" >/dev/null 2>&1 || return 0
-                # Use package-lock-only to avoid installing node_modules
-                npm install --package-lock-only --no-audit --no-fund || true
-                popd >/dev/null 2>&1 || true
-                CHANGED=true
-              else
-                echo "package-lock.json exists in $dir"
-              fi
-            fi
-          }
-
-          # Create lock for web/ if exists
-          create_pkg_lock "web"
-
-          # Create lock for root package.json if exists
-          create_pkg_lock "."
-
-          # Emit result
-          echo "CHANGED=${CHANGED}" >> $GITHUB_OUTPUT
-          if [ "$CHANGED" = "true" ]; then
-            echo "Some lock files were generated or updated."
-          else
-            echo "No changes required for lock files."
-          fi
-
-      - name: Show repo status (after generation)
-        run: |
-          echo "=== git status after generation ==="
-          git status --porcelain || true
-          git ls-files --deleted --modified --others --exclude-standard || true
-
-      - name: Commit & push generated lock files back to the current branch
-        run: |
-          # Only proceed if there are changes
-          if git diff --quiet && git diff --staged --quiet; then
-            echo "No generated files to commit. Skipping push."
-            exit 0
-          fi
-
-          # Configure git author
-          git config user.name "nebula-ci-bot"
-          git config user.email "nebula-ci-bot@users.noreply.github.com"
-
-          # Stage typical lock files (adjust if you have other paths)
-          if [ -f go.sum ]; then git add go.sum || true; fi
-          if [ -f package-lock.json ]; then git add package-lock.json || true; fi
-          if [ -f web/package-lock.json ]; then git add web/package-lock.json || true; fi
-
-          # If nothing staged, exit
-          if git diff --staged --quiet; then
-            echo "No staged lock files to commit after checks."
-            exit 0
-          fi
-
-          git commit -m "ci(auto): add/update generated lock files (go.sum, package-lock.json)" || true
-
-          # Determine branch name
-          BRANCH="$(echo "${GITHUB_REF}" | sed 's#refs/heads/##')"
-          echo "Attempting to push commits to branch: $BRANCH"
-
-          # Push using token (will fail if branch protected or permissions restricted)
-          git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" "HEAD:${BRANCH}" || {
-            echo "::warning::Push failed. This may be due to branch protection rules or insufficient token permissions."
-            echo "If push failed, the generated files remain on the runner. You can download them from job logs or modify this job to upload them as artifacts or create a PR instead."
-            exit 0
-          }
-
-      - name: Confirm pushed files
-        run: |
-          echo "After push, printing git status and last commit"
-          git log -n 3 --pretty=oneline || true
-          git status --porcelain || true
 
   chaos-testing:
     name: Chaos-Resistant Tests (Optional)
@@ -726,7 +578,6 @@ jobs:
 
       - name: Quick build attempt (chaos)
         run: |
-          echo "Running quick chaos build on node ${matrix.node-version} / $RUNNER_OS"
           if [ -f package.json ]; then
             npm ci --no-audit --no-fund || true
             npm run build --if-present || true
@@ -734,7 +585,6 @@ jobs:
 
       - name: Simulate randomized environment perturbation (dry-run)
         run: |
-          echo "Simulating missing file scenarios and corrupted cache"
           rm -rf node_modules || true
           npm ci --no-audit --no-fund || true
 
@@ -752,7 +602,6 @@ jobs:
           for f in bandit-report.json npm-audit.json pip-audit.json gitleaks-report.json deps-health-report.txt node-updates.json; do
             if [ -f $f ]; then cp $f ci-report/ || true; fi
           done
-
           echo "CI run: $GITHUB_RUN_ID" > ci-report/summary.txt
           echo "Branch: $GITHUB_REF" >> ci-report/summary.txt
           echo "Triggered by: $GITHUB_EVENT_NAME" >> ci-report/summary.txt
