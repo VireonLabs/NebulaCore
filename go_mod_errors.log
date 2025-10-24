@@ -1,0 +1,46 @@
+go: finding module for package github.com/Knetic/govaluate
+go: finding module for package github.com/spiffe/go-spiffe/v2/spiffetls
+go: finding module for package github.com/go-redis/redis/v8
+go: finding module for package github.com/hashicorp/vault/api
+go: finding module for package github.com/gin-gonic/gin
+go: finding module for package github.com/spiffe/go-spiffe/v2/workloadapi
+go: finding module for package gorm.io/gorm
+go: finding module for package github.com/quic-go/quic-go
+go: finding module for package gorm.io/driver/postgres
+go: finding module for package github.com/rogpeppe/go-internal/fmtsort
+go: found github.com/Knetic/govaluate in github.com/Knetic/govaluate v3.0.0+incompatible
+go: found github.com/spiffe/go-spiffe/v2/spiffetls in github.com/spiffe/go-spiffe/v2 v2.6.0
+go: found github.com/spiffe/go-spiffe/v2/workloadapi in github.com/spiffe/go-spiffe/v2 v2.6.0
+go: found github.com/quic-go/quic-go in github.com/quic-go/quic-go v0.55.0
+go: found github.com/go-redis/redis/v8 in github.com/go-redis/redis/v8 v8.11.5
+go: found github.com/hashicorp/vault/api in github.com/hashicorp/vault/api v1.22.0
+go: found github.com/gin-gonic/gin in github.com/gin-gonic/gin v1.11.0
+go: found gorm.io/gorm in gorm.io/gorm v1.31.0
+go: found gorm.io/driver/postgres in gorm.io/driver/postgres v1.6.0
+go: found github.com/rogpeppe/go-internal/fmtsort in github.com/rogpeppe/go-internal v1.14.1
+go: github.com/nebulacore/internal/agent/internal/api imports
+	github.com/spiffe/go-spiffe/v2/workloadapi imports
+	google.golang.org/grpc/status imports
+	google.golang.org/genproto/googleapis/rpc/status: ambiguous import: found package google.golang.org/genproto/googleapis/rpc/status in multiple modules:
+	google.golang.org/genproto v0.0.0-20201110150050-8816d57aaa9a (/data/data/com.termux/files/home/go/pkg/mod/google.golang.org/genproto@v0.0.0-20201110150050-8816d57aaa9a/googleapis/rpc/status)
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20250707201910-8d1bb00bc6a7 (/data/data/com.termux/files/home/go/pkg/mod/google.golang.org/genproto/googleapis/rpc@v0.0.0-20250707201910-8d1bb00bc6a7/status)
+go: github.com/nebulacore/internal/agent/internal/server imports
+	github.com/gin-gonic/gin imports
+	github.com/gin-gonic/gin/binding imports
+	github.com/ugorji/go/codec: ambiguous import: found package github.com/ugorji/go/codec in multiple modules:
+	github.com/ugorji/go v1.1.4 (/data/data/com.termux/files/home/go/pkg/mod/github.com/ugorji/go@v1.1.4/codec)
+	github.com/ugorji/go/codec v1.3.0 (/data/data/com.termux/files/home/go/pkg/mod/github.com/ugorji/go/codec@v1.3.0)
+go: github.com/nebulacore/internal/agent/internal/api imports
+	github.com/spiffe/go-spiffe/v2/workloadapi imports
+	google.golang.org/grpc/codes tested by
+	google.golang.org/grpc/codes.test imports
+	google.golang.org/genproto/googleapis/rpc/code: ambiguous import: found package google.golang.org/genproto/googleapis/rpc/code in multiple modules:
+	google.golang.org/genproto v0.0.0-20201110150050-8816d57aaa9a (/data/data/com.termux/files/home/go/pkg/mod/google.golang.org/genproto@v0.0.0-20201110150050-8816d57aaa9a/googleapis/rpc/code)
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20250707201910-8d1bb00bc6a7 (/data/data/com.termux/files/home/go/pkg/mod/google.golang.org/genproto/googleapis/rpc@v0.0.0-20250707201910-8d1bb00bc6a7/code)
+go: github.com/nebulacore/internal/agent/internal/api imports
+	github.com/spiffe/go-spiffe/v2/workloadapi imports
+	google.golang.org/grpc/status tested by
+	google.golang.org/grpc/status.test imports
+	google.golang.org/genproto/googleapis/rpc/errdetails: ambiguous import: found package google.golang.org/genproto/googleapis/rpc/errdetails in multiple modules:
+	google.golang.org/genproto v0.0.0-20201110150050-8816d57aaa9a (/data/data/com.termux/files/home/go/pkg/mod/google.golang.org/genproto@v0.0.0-20201110150050-8816d57aaa9a/googleapis/rpc/errdetails)
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20250707201910-8d1bb00bc6a7 (/data/data/com.termux/files/home/go/pkg/mod/google.golang.org/genproto/googleapis/rpc@v0.0.0-20250707201910-8d1bb00bc6a7/errdetails)
