@@ -18,37 +18,40 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: 🧭 Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Detect & fix deprecated import path
+      - name: 🔍 Detect & fix deprecated import path
         run: |
           echo "🔍 Searching for old quic-go import path..."
           FOUND=$(grep -R "github.com/lucas-clemente/quic-go" . || true)
           if [ -n "$FOUND" ]; then
-            echo "⚙️ Found old import path — applying replacements..."
+            echo "⚙️ Found deprecated import path — applying replacements..."
             grep -Rl "github.com/lucas-clemente/quic-go" . | \
               xargs sed -i 's#github.com/lucas-clemente/quic-go#github.com/quic-go/quic-go#g'
+            echo "✅ Replacement complete. Updated all occurrences successfully."
+            echo "🧾 Summary: quic-go import paths have been modernized."
           else
-            echo "✅ No deprecated import paths found."
+            echo "✅ No deprecated import paths found. Everything is already up to date."
           fi
 
-      - name: Remove old go.sum if exists
-        run: |
-          if [ -f go.sum ]; then
-            echo "🧹 Removing outdated go.sum..."
-            rm -f go.sum
-          else
-            echo "✅ No go.sum file to remove."
-          fi
-
-      - name: Commit & push updated files
+      - name: 💾 Commit & push updated files
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "ci(fix): updated deprecated quic-go import path"
+          commit_message: "ci(fix): auto-updated deprecated quic-go import path"
           branch: ${{ github.ref_name }}
-          author_name: "nebula-ci-bot"
-          author_email: "nebula-ci-bot@users.noreply.github.com"
-          commit_user_email: nebula-ci-bot@users.noreply.github.com
+          commit_user_name: "nebula-ci-bot"
+          commit_user_email: "nebula-ci-bot@users.noreply.github.com"
+
+      - name: 🟢 Report success
+        if: success()
+        run: |
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "✅ NebulaCore Auto-Fix completed successfully!"
+          echo "✅ All deprecated quic-go import paths have been fixed."
+          echo "✅ The repository is now using the latest correct path:"
+          echo "    github.com/quic-go/quic-go"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
