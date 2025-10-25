@@ -1,3 +1,4 @@
+
 name: NebulaCore CI (Self-healing, production-grade)
 
 on:
@@ -262,7 +263,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.npm
-          key: npm-${{ hashFiles('**/package-lock.json') }}
+          # include both root and web lockfile in key so cache is stable when web/package-lock.json exists
+          key: npm-${{ hashFiles('**/package-lock.json', 'web/package-lock.json') }}
 
       - name: Install frontend deps (if web/package.json exists) with self-heal
         id: frontend-install
@@ -331,7 +333,8 @@ jobs:
 
       - name: Trivy container scan (if Dockerfile exists)
         if: ${{ needs.inspect-pipeline.outputs.has_dockerfile == 'true' }}
-        uses: aquasecurity/trivy-action@v0.33.1
+        # <-- FIXED: use 'master' to avoid missing pinned tag errors (keeps action reachable)
+        uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'fs'
           ignore-unfixed: true
@@ -393,7 +396,7 @@ jobs:
           branch: ${{ github.head_ref || github.ref_name }}
           author_name: "nebula-ci-bot"
           author_email: "nebula-ci-bot@users.noreply.github.com"
-
+          
       - name: Create PR if on protected branch (Main) and AUTO_PR_ON_MAIN enabled
         if: ${{ github.ref == 'refs/heads/main' && env.AUTO_PR_ON_MAIN == 'true' }}
         uses: peter-evans/create-pull-request@v4
