@@ -1,6 +1,6 @@
 module github.com/nebulacore/internal/agent
 
-go 1.24.0
+go 1.24
 
 require (
 	github.com/Knetic/govaluate v3.0.0+incompatible
