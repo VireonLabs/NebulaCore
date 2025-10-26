@@ -1,18 +1,26 @@
-name: "CodeQL Security Scan"
+name: "CodeQL Analysis and Security Scan"
 
-# Top-level permissions required for CodeQL to push security results
+# Top-level permissions required so the action can report results to GitHub.
 permissions:
   actions: read
   contents: read
   security-events: write
 
 on:
+  # Run full scans on pushes to main/master (trusted context).
   push:
     branches: ["main", "master"]
-  pull_request:
+
+  # Use pull_request_target so the workflow runs in the context of the base repo
+  # (gives the workflow the ability to write security-results even for PRs).
+  # WARNING: pull_request_target can be risky if you run arbitrary commands from the PR head.
+  pull_request_target:
     branches: ["main", "master"]
+
+  # Weekly scheduled scan
   schedule:
-    - cron: '0 3 * * 0' # weekly (UTC) every Sunday 03:00
+    - cron: '0 3 * * 0' # weekly (UTC), every Sunday 03:00
+
   workflow_dispatch:
 
 concurrency:
@@ -25,11 +33,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Checkout repository (fetch full history to allow accurate analysis).
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # For safety when using pull_request_target, do not persist credentials to subsequent git commands.
+          persist-credentials: false
 
+      # (Optional) Cache Go modules to speed up builds
       - name: Setup Go cache
         if: runner.os == 'Linux'
         uses: actions/cache@v4
@@ -41,34 +53,38 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
 
+      # Prepare Go modules if present (non-failing)
       - name: Ensure Go modules are present (non-failing)
-        # Attempt to prepare Go modules if repo contains go.mod — this will create/update go.sum
         run: |
           if [ -f go.mod ]; then
             echo "Found go.mod — running 'go mod tidy' and 'go mod download'"
-            go mod tidy
-            go mod download
+            go mod tidy || true
+            go mod download || true
           else
             echo "No go.mod found in repo root — skipping Go module setup"
           fi
 
+      # Initialize CodeQL — specify languages and request latest CLI tools
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          # adjust languages to your repo. Keep minimal to reduce noise.
-          languages: go, javascript
-          # optional: specify a config file
+          languages: go, javascript, python
+          tools: latest
+          # Optional: uncomment if you have custom config
           # config-file: .github/codeql/codeql-config.yml
 
+      # Autobuild (CodeQL) — action will attempt language-specific build steps
       - name: Autobuild (CodeQL)
         uses: github/codeql-action/autobuild@v3
-        # autobuild will attempt language-specific build steps. For Go, ensure modules are ready.
 
-      - name: Run CodeQL database creation and analysis
+      # Run CodeQL analysis and publish results to GitHub Code Scanning
+      - name: Run CodeQL analysis
         uses: github/codeql-action/analyze@v3
         with:
           category: "security"
+          # By default results are uploaded to GitHub Code Scanning when permissions allow.
 
+      # Always upload any logs/artifacts to help debug failed runs
       - name: Upload CodeQL logs (artifact)
         if: always()
         uses: actions/upload-artifact@v4
