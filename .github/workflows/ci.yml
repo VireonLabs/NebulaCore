@@ -27,7 +27,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  GO_VERSION: "1.24"
+  GO_VERSION: "1.20"
   PYTHON_VERSION: "3.11"
   NODE_VERSION: "18"
   CHAOS_MODE: "false"
@@ -372,7 +372,7 @@ jobs:
             go install github.com/securego/gosec/v2/cmd/gosec@latest || true
             "$GOBIN/gosec" ./... || true
           fi
-          
+
       - name: Trivy container scan (if Dockerfile exists)
         if: ${{ needs.inspect-pipeline.outputs.has_dockerfile == 'true' }}
         uses: aquasecurity/trivy-action@master
