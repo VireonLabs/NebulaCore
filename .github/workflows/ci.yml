@@ -16,7 +16,6 @@ on:
     - cron: '0 3 * * 0'
   workflow_dispatch: {}
 
-# --- Top-level permissions & environment (fixes: Resource not accessible / telemetry / CodeQL) ---
 permissions:
   actions: read
   contents: read
@@ -65,7 +64,6 @@ jobs:
           has_tests=false
           has_dockerfile=false
 
-          # Use git ls-files and find for robust, recursive detection
           if git ls-files | grep -E '\.go$' >/dev/null 2>&1 || find . -type f -name "go.mod" | grep -q .; then
             has_go=true
           fi
@@ -520,7 +518,7 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          languages: ['go','javascript','python']
+          languages: ['go', 'javascript', 'python']
           tools: linked
           setup:
             cli-version: latest
@@ -533,7 +531,6 @@ jobs:
       - name: Custom build helpers (optional)
         if: always()
         run: |
-          # Ensure common build steps have run so extractors see correct files
           if [ -f go.mod ]; then go build ./... || true; fi
           if [ -f web/package.json ]; then (cd web && npm run build --if-present) || true; fi
 
@@ -584,7 +581,7 @@ jobs:
             openssl enc -aes-256-cbc -salt -pbkdf2 -pass pass:"${ARTIFACT_ENCRYPTION_KEY}" -in /tmp/nebula-artifacts/nebula-artifacts.tgz -out /tmp/nebula-artifacts/nebula-artifacts.tgz.enc || true
             ls -lh /tmp/nebula-artifacts || true
           fi
-
+          
       - name: Upload staging artifact
         uses: actions/upload-artifact@v4
         with:
