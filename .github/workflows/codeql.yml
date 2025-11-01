@@ -1,4 +1,5 @@
 name: "CodeQL Analysis and Security Scan"
+
 on:
   push:
     branches: ["main", "master"]
@@ -7,7 +8,7 @@ on:
     types: [opened, synchronize, reopened]
   schedule:
     - cron: '0 3 * * 0'
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 permissions:
   actions: read
@@ -54,10 +55,10 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          languages: ['go', 'javascript-typescript', 'python']
-          tools: linked
-          setup:
-            cli-version: latest
+          # لاحظ: مدخلات `with` هنا كسلاسل نصية مفصولة بفواصل
+          languages: 'go,javascript-typescript,python'
+          tools: 'linked'
+          cli-version: 'latest'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -96,4 +97,4 @@ jobs:
             ${{ github.workspace }}/codeql*
             ${{ github.workspace }}/.github/codeql
             ./results
-          
+            
