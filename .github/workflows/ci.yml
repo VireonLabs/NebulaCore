@@ -3,15 +3,15 @@ name: NebulaCore CI (Self-healing, production-grade)
 on:
   push:
     branches:
-      - "main"
-      - "develop"
-      - "release/*"
+      - main
+      - develop
+      - 'release/*'
     paths-ignore:
-      - "docs/**"
-      - "*.md"
+      - docs/**
+      - '*.md'
   pull_request_target:
     types: [opened, synchronize, reopened]
-    branches: ["main"]
+    branches: [main]
   schedule:
     - cron: '0 3 * * 0'
   workflow_dispatch: {}
@@ -26,13 +26,13 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  GO_VERSION: "1.20"
-  PYTHON_VERSION: "3.11"
-  NODE_VERSION: "18"
-  CHAOS_MODE: "false"
+  GO_VERSION: '1.20'
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '18'
+  CHAOS_MODE: 'false'
   ARTIFACT_ENCRYPTION_KEY: ${{ secrets.ARTIFACT_ENCRYPTION_KEY }}
-  AUTO_PR_ON_MAIN: "true"
-  SELF_HEAL_VERBOSE: "true"
+  AUTO_PR_ON_MAIN: 'true'
+  SELF_HEAL_VERBOSE: 'true'
   CODEQL_DISABLE_TELEMETRY: true
 
 jobs:
@@ -295,8 +295,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: 'web/package-lock.json'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
 
       - name: Cache node modules
         uses: actions/cache@v4
@@ -375,9 +375,9 @@ jobs:
         if: ${{ needs.inspect-pipeline.outputs.has_dockerfile == 'true' }}
         uses: aquasecurity/trivy-action@master
         with:
-          scan-type: 'fs'
+          scan-type: fs
           ignore-unfixed: true
-          format: 'table'
+          format: table
           exit-code: '1'
           vuln-type: 'os,library'
           security-checks: 'vuln,secret'
@@ -396,8 +396,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: security-reports
-          path: |
-            gitleaks-report.json
+          path: gitleaks-report.json
           if-no-files-found: ignore
 
   autofix-go:
@@ -459,12 +458,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          
+
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-
+          
       - name: Install autoformatters
         run: |
           python -m pip install --upgrade pip || true
@@ -518,11 +517,8 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          languages:
-            - go
-            - javascript
-            - python
-          tools: linked
+          languages: ['go', 'javascript', 'python']
+          tools: 'linked'
           cli-version: 'latest'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -588,8 +584,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: staging-artifact
-          path: |
-            /tmp/nebula-artifacts/nebula-artifacts.tgz*
+          path: /tmp/nebula-artifacts/nebula-artifacts.tgz*
           retention-days: 7
           if-no-files-found: ignore
 
@@ -682,7 +677,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-          cache: 'npm'
+          cache: npm
 
       - name: Quick build attempt (chaos)
         run: |
