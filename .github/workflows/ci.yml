@@ -435,7 +435,7 @@ jobs:
           go vet ./... || true
           git status --porcelain || true
       - name: Commit & push fixes (if any)
-        uses: stefanzweifel/git-auto-commit-action@v5
+        uses: stefanzweifel/git-auto-commit-action@v7
         with:
           commit_message: "ci(auto): go fmt & tidy fixes"
           branch: ${{ github.head_ref || github.ref_name }}
@@ -489,7 +489,7 @@ jobs:
 
           git status --porcelain || true
       - name: Commit & push fixes (if any)
-        uses: stefanzweifel/git-auto-commit-action@v5
+        uses: stefanzweifel/git-auto-commit-action@v7
         with:
           commit_message: "ci(auto): python formatting & dependency fixes"
           branch: ${{ github.head_ref || github.ref_name }}
