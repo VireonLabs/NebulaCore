@@ -44,49 +44,91 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
 
-      - name: Ensure Go modules (non-failing)
-        if: always()
+      - name: Ensure Go modules (strict — fail if problems)
+        if: runner.os == 'Linux'
         run: |
+          set -e
           if [ -f go.mod ]; then
-            go mod tidy || true
-            go mod download || true
+            go mod tidy
+            go mod download
           fi
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          # لاحظ: مدخلات `with` هنا كسلاسل نصية مفصولة بفواصل
-          languages: 'go,javascript-typescript,python'
+          # supported inputs: languages, tools, ...
+          languages: ['go', 'javascript', 'python']
           tools: 'linked'
-          cli-version: 'latest'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Autobuild (CodeQL)
+      - name: Autobuild (CodeQL) — required for analysis
         uses: github/codeql-action/autobuild@v3
 
-      - name: Build (custom example for Go)
-        if: always()
+      - name: Build (Go) — strict: if build fails, job fails
+        if: runner.os == 'Linux'
         run: |
+          set -e
           if [ -f go.mod ]; then
-            go build ./... || true
+            go build ./...
           fi
 
-      - name: Perform CodeQL analysis
+      - id: codeql-local
+        name: Run CodeQL analysis (local, required)
         uses: github/codeql-action/analyze@v3
         with:
-          output: results
-          upload: always
-          add-snippets: false
+          upload: false   # produce SARIF locally; do not attempt to upload in this required step
+          threads: 2
+          ram: 7000
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CODEQL_DISABLE_TELEMETRY: true
+
+      - id: codeql-upload
+        name: Attempt SARIF upload to GitHub Security (one try, non-fatal)
+        # هذا يحاول الرفع فعلاً — لكن لن يوقف الـ job عند الفشل
+        continue-on-error: true
+        uses: github/codeql-action/analyze@v3
+        with:
+          upload: true
+          threads: 2
+          ram: 7000
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CODEQL_DISABLE_TELEMETRY: true
+
+      - name: Report upload status
+        if: always()
+        run: |
+          echo "CodeQL local analysis step outcome: ${{ steps.codeql-local.outcome }}"
+          echo "CodeQL upload attempt outcome: ${{ steps.codeql-upload.outcome }}"
+          if [ "${{ steps.codeql-upload.outcome }}" = "failure" ]; then
+            echo "WARNING: CodeQL SARIF upload failed. This is non-fatal by design."
+            echo "If you want SARIF in Security → Code scanning, enable Advanced Security or fix upload errors."
+          fi
+
+      - name: Collect CodeQL output if present
+        if: always()
+        run: |
+          set -e || true
+          mkdir -p codeql-results || true
+          if [ -d "./results" ]; then cp -r ./results ./codeql-results || true; fi
+          # find and copy any .sarif files (from either analysis run)
+          find . -type f -name "*.sarif" -maxdepth 6 -print > /tmp/sarif-files || true
+          if [ -s /tmp/sarif-files ]; then
+            while read -r f; do
+              cp --parents "$f" codeql-results || true
+            done < /tmp/sarif-files
+          fi
+          ls -lah codeql-results || true
 
       - name: Upload CodeQL results artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: codeql-results-${{ github.run_id }}
-          path: ./results
+          path: codeql-results
+          if-no-files-found: ignore
 
       - name: Upload CodeQL logs (artifact)
         if: always()
@@ -96,5 +138,4 @@ jobs:
           path: |
             ${{ github.workspace }}/codeql*
             ${{ github.workspace }}/.github/codeql
-            ./results
-            
+          if-no-files-found: ignore
