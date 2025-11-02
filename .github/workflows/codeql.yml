@@ -65,7 +65,7 @@ jobs:
       - name: Autobuild (CodeQL) — required for analysis
         uses: github/codeql-action/autobuild@v3
 
-      - name: Build (Go) — strict: if build fails, job fails
+      - name: "Build (Go) — strict: if build fails, job fails"
         if: runner.os == 'Linux'
         run: |
           set -e
