@@ -518,10 +518,12 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          languages: ['go', 'javascript', 'python']
-          tools: linked
-          setup:
-            cli-version: latest
+          languages:
+            - go
+            - javascript
+            - python
+          tools: 'linked'
+          cli-version: 'latest'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -533,7 +535,7 @@ jobs:
         run: |
           if [ -f go.mod ]; then go build ./... || true; fi
           if [ -f web/package.json ]; then (cd web && npm run build --if-present) || true; fi
-
+          
       - name: Perform CodeQL Scan
         uses: github/codeql-action/analyze@v3
         with:
@@ -581,7 +583,7 @@ jobs:
             openssl enc -aes-256-cbc -salt -pbkdf2 -pass pass:"${ARTIFACT_ENCRYPTION_KEY}" -in /tmp/nebula-artifacts/nebula-artifacts.tgz -out /tmp/nebula-artifacts/nebula-artifacts.tgz.enc || true
             ls -lh /tmp/nebula-artifacts || true
           fi
-          
+
       - name: Upload staging artifact
         uses: actions/upload-artifact@v4
         with:
