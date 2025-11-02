@@ -459,7 +459,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
+          
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
@@ -522,7 +522,7 @@ jobs:
             - go
             - javascript
             - python
-          tools: 'linked'
+          tools: linked
           cli-version: 'latest'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -535,7 +535,7 @@ jobs:
         run: |
           if [ -f go.mod ]; then go build ./... || true; fi
           if [ -f web/package.json ]; then (cd web && npm run build --if-present) || true; fi
-          
+
       - name: Perform CodeQL Scan
         uses: github/codeql-action/analyze@v3
         with:
@@ -732,3 +732,4 @@ jobs:
       - name: Evaluate results (best-effort)
         run: |
           echo "Gate check complete"
+          
