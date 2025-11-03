@@ -10,31 +10,31 @@ import (
 	"syscall"
 	"time"
 
-	"aggregation"
-	"scheduler"
-	"storage"
-	"microtasking"
-	"telemetry"
-	"qos"
-	"selfhealing"
-	"connectors"
+	"github.com/Aurionex/NebulaCore/aggregation"
+	"github.com/Aurionex/NebulaCore/ai"
+	"github.com/Aurionex/NebulaCore/connectors"
+	"github.com/Aurionex/NebulaCore/microtasking"
+	"github.com/Aurionex/NebulaCore/qos"
+	"github.com/Aurionex/NebulaCore/scheduler"
+	"github.com/Aurionex/NebulaCore/selfhealing"
+	"github.com/Aurionex/NebulaCore/storage"
+	"github.com/Aurionex/NebulaCore/telemetry"
 
-	"internal/auto_development"
-	intsec "internal/security"
-	"internal/testing"
-	"internal/monitoring"
-	"internal/geo"
-	"internal/scaling"
-	"internal/identity"
-	"internal/marketplace"
-	"internal/policy"
-	"internal/quantum"
-	"internal/network"
-	"internal/billing"
-
-	"ai"
+	"github.com/Aurionex/NebulaCore/internal/auto_development"
+	intsec "github.com/Aurionex/NebulaCore/internal/security"
+	"github.com/Aurionex/NebulaCore/internal/billing"
+	"github.com/Aurionex/NebulaCore/internal/geo"
+	"github.com/Aurionex/NebulaCore/internal/identity"
+	"github.com/Aurionex/NebulaCore/internal/marketplace"
+	"github.com/Aurionex/NebulaCore/internal/monitoring"
+	"github.com/Aurionex/NebulaCore/internal/network"
+	"github.com/Aurionex/NebulaCore/internal/policy"
+	"github.com/Aurionex/NebulaCore/internal/quantum"
+	"github.com/Aurionex/NebulaCore/internal/scaling"
+	"github.com/Aurionex/NebulaCore/internal/testing"
 )
 
+// Logger interface for pluggable logging
 type Logger interface {
 	Info(args ...interface{})
 	Infof(format string, args ...interface{})
