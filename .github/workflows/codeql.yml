@@ -123,7 +123,7 @@ jobs:
 
       - name: Upload CodeQL results artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: codeql-results-${{ github.run_id }}
           path: codeql-results
@@ -131,7 +131,7 @@ jobs:
 
       - name: Upload CodeQL logs (artifact)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: codeql-logs-${{ github.run_id }}
           path: |
