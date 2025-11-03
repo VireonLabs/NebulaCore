@@ -1,4 +1,4 @@
-module github.com/nebulacore/internal/agent
+module github.com/Aurionex/NebulaCore
 
 go 1.20
 
