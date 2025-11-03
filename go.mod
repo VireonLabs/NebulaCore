@@ -91,7 +91,7 @@ github.com/rogpeppe/go-internal v1.14.1 // indirect
 github.com/ryanuber/go-glob v1.0.0 // indirect
 github.com/sirupsen/logrus v1.9.3 // indirect
 github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
-github.com/ugorji/go-codec v1.3.0 // indirect
+github.com/ugorji/go/codec v1.3.0 // indirect
 github.com/vishvananda/netlink v1.1.1-0.20210330154013-f5de75959ad5 // indirect
 github.com/vishvananda/netns v0.0.0-20210104183010-2eb08e3e575f // indirect
 go.mongodb.org/mongo-driver v1.8.3 // indirect
@@ -107,5 +107,3 @@ google.golang.org/grpc v1.75.1 // indirect
 google.golang.org/protobuf v1.36.10 // indirect
 gopkg.in/yaml.v2 v2.4.0 // indirect
 )
-
-replace github.com/mitchellh/osext => github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0
