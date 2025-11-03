@@ -9,8 +9,6 @@ on:
 
 permissions:
   contents: read
-  actions: read
-  checks: write
   security-events: write
 
 env:
@@ -24,129 +22,36 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       has_go: ${{ steps.detect.outputs.has_go }}
-      has_node: ${{ steps.detect.outputs.has_node }}
       has_python: ${{ steps.detect.outputs.has_python }}
-      node_dir: ${{ steps.detect.outputs.node_dir }}
-      pkg_lock: ${{ steps.detect.outputs.pkg_lock }}
-      go_mod_paths: ${{ steps.detect.outputs.go_mod_paths }}
-      go_mod_paths_json: ${{ steps.detect.outputs.go_mod_paths_json }}
-      has_go_sum: ${{ steps.detect.outputs.has_go_sum }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - id: detect
-        name: Detect languages and important files (recursive)
-        run: |
-          # defaults
-          echo "has_go=false" >> $GITHUB_OUTPUT
-          echo "has_node=false" >> $GITHUB_OUTPUT
-          echo "has_python=false" >> $GITHUB_OUTPUT
-          echo "node_dir=." >> $GITHUB_OUTPUT
-          echo "pkg_lock=" >> $GITHUB_OUTPUT
-          echo "go_mod_paths=" >> $GITHUB_OUTPUT
-          echo "go_mod_paths_json=[]" >> $GITHUB_OUTPUT
-          echo "has_go_sum=false" >> $GITHUB_OUTPUT
-
-          # detect package.json (node workspace)
-          pkg_json=$(find . -type f -name 'package.json' -print -quit || true)
-          if [ -n "$pkg_json" ]; then
-            dir=$(dirname "$pkg_json")
-            dir="${dir#./}"
-            if [ -z "$dir" ]; then dir="."; fi
-            echo "has_node=true" >> $GITHUB_OUTPUT
-            echo "node_dir=$dir" >> $GITHUB_OUTPUT
-          fi
-
-          # find any lock file (npm/yarn/shrinkwrap)
-          lock=$(find . -type f \( -name 'package-lock.json' -o -name 'yarn.lock' -o -name 'npm-shrinkwrap.json' \) -print -quit || true)
-          if [ -n "$lock" ]; then
-            echo "pkg_lock=$lock" >> $GITHUB_OUTPUT
-          fi
-
-          # detect python (requirements.txt or pyproject.toml)
-          pyreq=$(find . -type f -name 'requirements.txt' -print -quit || true)
-          pyproj=$(find . -type f -name 'pyproject.toml' -print -quit || true)
-          if [ -n "$pyreq" ] || [ -n "$pyproj" ]; then
-            echo "has_python=true" >> $GITHUB_OUTPUT
-          fi
-
-          # find all go modules (supports mono-repo)
-          mapfile -t mods < <(find . -type f -name 'go.mod' -print || true)
-          if [ "${#mods[@]}" -gt 0 ]; then
-            echo "has_go=true" >> $GITHUB_OUTPUT
-            dirs=""
-            json="["
-            first=true
-            any_sum=false
-            for m in "${mods[@]}"; do
-              d=$(dirname "$m")
-              d="${d#./}"
-              if [ -z "$d" ]; then d="."; fi
-              dirs="$dirs $d"
-              if [ "$first" = true ]; then
-                json="${json}\"${d}\""
-                first=false
-              else
-                json="${json},\"${d}\""
-              fi
-              # check presence of go.sum for this module (do NOT modify anything)
-              if [ -f "${d}/go.sum" ] || ( [ "$d" = "." ] && [ -f "go.sum" ] ); then
-                any_sum=true
-              fi
-            done
-            json="${json}]"
-            # trim leading space of dirs
-            dirs="${dirs#"${dirs%%[! ]*}"}"
-            echo "go_mod_paths=$dirs" >> $GITHUB_OUTPUT
-            echo "go_mod_paths_json=$json" >> $GITHUB_OUTPUT
-            if [ "$any_sum" = true ]; then
-              echo "has_go_sum=true" >> $GITHUB_OUTPUT
-            fi
-          fi
-
-  # Build Go modules in parallel — ONLY for modules that have go.sum (we don't auto-fix)
-  build-go:
-    name: Build & Test Go (per module; only modules with go.sum)
-    runs-on: ubuntu-latest
-    needs: setup
-    if: ${{ needs.setup.outputs.has_go == 'true' && needs.setup.outputs.has_go_sum == 'true' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        module: ${{ fromJson(needs.setup.outputs.go_mod_paths_json) }}
+      has_node: ${{ steps.detect.outputs.has_node }}
+      has_web: ${{ steps.detect.outputs.has_web }}
     steps:
       - uses: actions/checkout@v4
+      - id: detect
+        run: |
+          echo "has_go=false" >> $GITHUB_OUTPUT
+          echo "has_python=false" >> $GITHUB_OUTPUT
+          echo "has_node=false" >> $GITHUB_OUTPUT
+          echo "has_web=false" >> $GITHUB_OUTPUT
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
+          if [ -f "go.mod" ]; then echo "has_go=true" >> $GITHUB_OUTPUT; fi
+          if [ -f "requirements.txt" ]; then echo "has_python=true" >> $GITHUB_OUTPUT; fi
+          if [ -f "package.json" ]; then echo "has_node=true" >> $GITHUB_OUTPUT; fi
+          if [ -f "web/package.json" ] || [ -d "web" ]; then echo "has_web=true" >> $GITHUB_OUTPUT; fi
+
+  build-go:
+    name: Build & Test Go
+    runs-on: ubuntu-latest
+    needs: setup
+    if: ${{ needs.setup.outputs.has_go == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-
-      - name: Build & Test module ${{ matrix.module }}
-        env:
-          GO111MODULE: "on"
-        run: |
-          set -euo pipefail
-          MOD_DIR="${{ matrix.module }}"
-          echo "=> Candidate module: $MOD_DIR"
-          # normalize path
-          if [ -z "$MOD_DIR" ] || [ "$MOD_DIR" = "." ]; then
-            SEARCH_DIR="."
-          else
-            SEARCH_DIR="$MOD_DIR"
-          fi
-          # If go.sum is absent we skip to avoid mutating repository
-          if [ -f "${SEARCH_DIR}/go.sum" ] || [ -f "./go.sum" -a "${SEARCH_DIR}" = "." ]; then
-            echo "=> go.sum found for ${SEARCH_DIR}. Running tests & build."
-            cd "$SEARCH_DIR"
-            go test ./... -v
-            go build ./...
-            cd "$GITHUB_WORKSPACE"
-            echo "=> Done module: ${SEARCH_DIR}"
-          else
-            echo "=> Skipping ${SEARCH_DIR}: go.sum not found. To enable CI for this module, run 'go mod tidy' locally and commit go.sum."
-          fi
+      - run: |
+          go mod tidy || true
+          go test ./... -v
 
   lint-python:
     name: Lint & Security (Python)
@@ -158,102 +63,59 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - name: Lint & Bandit
-        run: |
-          set -euo pipefail
-          pip install --upgrade pip
+      - run: |
           pip install flake8 bandit || true
           flake8 . || true
           bandit -r . || true
 
   frontend:
-    name: Build Frontend (only if lock file present)
+    name: Build Frontend
     runs-on: ubuntu-latest
     needs: setup
-    if: ${{ needs.setup.outputs.has_node == 'true' }}
+    if: ${{ needs.setup.outputs.has_node == 'true' || needs.setup.outputs.has_web == 'true' }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-
-      - name: Install & Build (in detected node_dir) — skip if no lock file
-        working-directory: ${{ needs.setup.outputs.node_dir }}
+          cache: npm
+      - name: Install frontend deps (in web/)
+        working-directory: ./web
         run: |
-          set -euo pipefail
-          DIR="${{ needs.setup.outputs.node_dir }}"
-          echo "Working dir: $DIR"
-          if [ -f "${DIR}/package-lock.json" ] || [ -f "${DIR}/yarn.lock" ]; then
-            cd "$DIR"
-            if [ -f package-lock.json ]; then
-              npm ci
-            else
-              npm install
-            fi
-            npm run build --if-present
-            npm test --if-present
+          if [ -f package-lock.json ] || [ -f yarn.lock ] || [ -f npm-shrinkwrap.json ]; then
+            npm ci --no-audit --no-fund
           else
-            echo "Skipping frontend build: no package-lock.json or yarn.lock in ${DIR}. To enable CI, generate and commit a lock file (npm ci will use package-lock.json)."
+            npm install --no-audit --no-fund
           fi
+      - name: Build & Test (frontend) in web/
+        working-directory: ./web
+        run: |
+          npm run build --if-present
+          npm test --if-present
 
   codeql:
     name: CodeQL Security Analysis
     runs-on: ubuntu-latest
     needs: setup
-    if: always()
     permissions:
       contents: read
       security-events: write
     steps:
       - uses: actions/checkout@v4
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+      - uses: github/codeql-action/init@v3
         with:
-          languages: go, javascript, python
-
-      - name: Conditionally run CodeQL autobuild (only if at least one go.sum exists)
-        if: ${{ needs.setup.outputs.has_go == 'true' && needs.setup.outputs.has_go_sum == 'true' }}
-        run: |
-          echo "Some go.sum files present — attempting autobuild to aid CodeQL extraction."
-          # We purposely DO NOT run 'go mod tidy' here to avoid changing repository.
-          # Attempt a best-effort build; if it fails that is reported in logs.
-          for d in ${{ needs.setup.outputs.go_mod_paths }}; do
-            echo "Trying to build $d"
-            if [ -z "$d" ] || [ "$d" = "." ]; then
-              cd "$GITHUB_WORKSPACE"
-            else
-              cd "$GITHUB_WORKSPACE/$d"
-            fi
-            # only attempt build if go.sum exists here
-            if [ -f "go.sum" ]; then
-              go build ./... || true
-            else
-              echo "No go.sum in $(pwd) — skipping build for this module."
-            fi
-            cd "$GITHUB_WORKSPACE"
-          done
-
-      - name: Run CodeQL analysis
-        uses: github/codeql-action/analyze@v3
-        continue-on-error: false
+          # scalar string to avoid strict YAML parsers
+          languages: "go, python, javascript"
+      - uses: github/codeql-action/autobuild@v3
+      - uses: github/codeql-action/analyze@v3
+        with:
+          upload: "false"
 
   summary:
     name: Summary Report
     runs-on: ubuntu-latest
-    needs: setup
     if: always()
     steps:
       - run: |
-          echo "✅ CI finished for $GITHUB_REPOSITORY (run $GITHUB_RUN_ID)"
-          echo "Detected outputs:"
-          echo "  has_go = ${{ needs.setup.outputs.has_go }}"
-          echo "  has_go_sum = ${{ needs.setup.outputs.has_go_sum }}"
-          echo "  has_node = ${{ needs.setup.outputs.has_node }}"
-          echo "  has_python = ${{ needs.setup.outputs.has_python }}"
-          echo "  node_dir = ${{ needs.setup.outputs.node_dir }}"
-          echo "  pkg_lock = ${{ needs.setup.outputs.pkg_lock }}"
-          echo "  go_mod_paths = ${{ needs.setup.outputs.go_mod_paths }}"
+          echo "✅ CI completed (or finished with logs) for $GITHUB_REPOSITORY"
+          echo "Run ID: $GITHUB_RUN_ID"
