@@ -254,7 +254,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: "go, python, javascript"
 
@@ -309,7 +309,7 @@ jobs:
           done
 
       - name: Run CodeQL analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           upload: "false"   # 🚫 إيقاف رفع نتائج التحليل (لن يرسلها إلى GitHub Security)
 
