@@ -10,31 +10,27 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Aurionex/NebulaCore/aggregation"
 	"github.com/Aurionex/NebulaCore/ai"
 	"github.com/Aurionex/NebulaCore/connectors"
-	"github.com/Aurionex/NebulaCore/microtasking"
-	"github.com/Aurionex/NebulaCore/qos"
-	"github.com/Aurionex/NebulaCore/scheduler"
-	"github.com/Aurionex/NebulaCore/selfhealing"
-	"github.com/Aurionex/NebulaCore/storage"
-	"github.com/Aurionex/NebulaCore/telemetry"
 
-	"github.com/Aurionex/NebulaCore/internal/auto_development"
+	"github.com/Aurionex/NebulaCore/internal/aggregation"
+	"github.com/Aurionex/NebulaCore/internal/microtasking"
+	"github.com/Aurionex/NebulaCore/internal/qos"
+	"github.com/Aurionex/NebulaCore/internal/scheduler"
+	"github.com/Aurionex/NebulaCore/internal/selfhealing"
+	"github.com/Aurionex/NebulaCore/internal/storage"
+	"github.com/Aurionex/NebulaCore/internal/telemetry"
+
 	intsec "github.com/Aurionex/NebulaCore/internal/security"
 	"github.com/Aurionex/NebulaCore/internal/billing"
 	"github.com/Aurionex/NebulaCore/internal/geo"
 	"github.com/Aurionex/NebulaCore/internal/identity"
-	"github.com/Aurionex/NebulaCore/internal/marketplace"
 	"github.com/Aurionex/NebulaCore/internal/monitoring"
-	"github.com/Aurionex/NebulaCore/internal/network"
 	"github.com/Aurionex/NebulaCore/internal/policy"
 	"github.com/Aurionex/NebulaCore/internal/quantum"
 	"github.com/Aurionex/NebulaCore/internal/scaling"
-	"github.com/Aurionex/NebulaCore/internal/testing"
 )
 
-// Logger interface for pluggable logging
 type Logger interface {
 	Info(args ...interface{})
 	Infof(format string, args ...interface{})
@@ -124,41 +120,36 @@ func initCoreModules() (*aggregation.ResourcePool, *scheduler.AdvancedScheduler,
 	return resourcePool, sched, storageLayer, mtm, telemetryManager, qosManager, selfHeal
 }
 
-func initSmartModules(resourcePool *aggregation.ResourcePool, sched *scheduler.AdvancedScheduler, storageLayer *storage.DistributedStorage) (*auto_development.AutoDevEngine, *intsec.SecurityAdvisorAI, *testing.Sandbox, *monitoring.ServiceMonitor, *geo.LocationManager, *scaling.PredictiveScaler, *identity.IdentityFederation, *marketplace.Marketplace, *policy.SimulatorPolicyEngine, *quantum.QSA, *network.SDNController, *intsec.AttestationManager, *billing.BillingEngine, *policy.DataResidencyEnforcer, []func(context.Context) error) {
+func initSmartModules(resourcePool *aggregation.ResourcePool, sched *scheduler.AdvancedScheduler, storageLayer *storage.DistributedStorage) (*intsec.SecurityAdvisorAI, *monitoring.ServiceMonitor, *geo.LocationManager, *scaling.PredictiveScaler, *identity.IdentityFederation, *policy.SimulatorPolicyEngine, *quantum.QSA, *intsec.AttestationManager, *billing.BillingEngine, *policy.DataResidencyEnforcer, []func(context.Context) error) {
 	hooks := []func(context.Context) error{}
-	autoDev := auto_development.NewAutoDevEngine(resourcePool, sched, storageLayer)
 	secAdvisor := intsec.NewSecurityAdvisorAI()
-	sandbox := testing.NewSandbox("auto-test")
 	sm := monitoring.NewServiceMonitor()
 	locationMgr := geo.NewLocationManager()
 	scaler := scaling.NewPredictiveScaler(sm)
 	idFed := identity.NewIdentityFederation()
-	market := marketplace.NewMarketplace()
 	simPolicy := policy.NewSimulatorPolicyEngine()
 	qsa := quantum.NewQSA()
-	sdn := network.NewSDNController()
 	attestation := intsec.NewAttestationManager()
 	billingEngine := billing.NewBillingEngine()
 	dataResidency := policy.NewDataResidencyEnforcer()
-	registerShutdownIfPossible(&hooks, autoDev)
+
 	registerShutdownIfPossible(&hooks, secAdvisor)
-	registerShutdownIfPossible(&hooks, sandbox)
 	registerShutdownIfPossible(&hooks, sm)
 	registerShutdownIfPossible(&hooks, locationMgr)
 	registerShutdownIfPossible(&hooks, scaler)
 	registerShutdownIfPossible(&hooks, idFed)
-	registerShutdownIfPossible(&hooks, market)
 	registerShutdownIfPossible(&hooks, simPolicy)
 	registerShutdownIfPossible(&hooks, qsa)
-	registerShutdownIfPossible(&hooks, sdn)
 	registerShutdownIfPossible(&hooks, attestation)
 	registerShutdownIfPossible(&hooks, billingEngine)
 	registerShutdownIfPossible(&hooks, dataResidency)
-	return autoDev, secAdvisor, sandbox, sm, locationMgr, scaler, idFed, market, simPolicy, qsa, sdn, attestation, billingEngine, dataResidency, hooks
+
+	return secAdvisor, sm, locationMgr, scaler, idFed, simPolicy, qsa, attestation, billingEngine, dataResidency, hooks
 }
 
 func initConnectorsAndOrchestrator(resourcePool *aggregation.ResourcePool, sched *scheduler.AdvancedScheduler, storageLayer *storage.DistributedStorage, mtm *microtasking.MicroTaskManager, telemetryManager *telemetry.TelemetryManager, qosManager *qos.QoSManager, selfHeal *selfhealing.SelfHealingManager) (*ai.AIOrchestrator, *monitoring.ServiceMonitor, []func(context.Context) error) {
-	autoDev, secAdvisor, sandbox, serviceMon, locationMgr, scaler, idFed, market, simPolicy, qsa, sdn, attestation, billingEngine, dataResidency, hooks := initSmartModules(resourcePool, sched, storageLayer)
+	secAdvisor, serviceMon, locationMgr, scaler, idFed, simPolicy, qsa, attestation, billingEngine, dataResidency, hooks := initSmartModules(resourcePool, sched, storageLayer)
+
 	linode := connectors.NewLinodeConnector(os.Getenv("LINODE_TOKEN"))
 	hetzner := connectors.NewHetznerConnector(os.Getenv("HETZNER_TOKEN"))
 	cloudflare, cfErr := connectors.NewCloudflareConnector(os.Getenv("CF_EMAIL"), os.Getenv("CF_KEY"))
@@ -168,19 +159,18 @@ func initConnectorsAndOrchestrator(resourcePool *aggregation.ResourcePool, sched
 	registerShutdownIfPossible(&hooks, linode)
 	registerShutdownIfPossible(&hooks, hetzner)
 	registerShutdownIfPossible(&hooks, cloudflare)
+
 	aiOrch := ai.NewAIOrchestrator(resourcePool, sched, storageLayer, mtm, telemetryManager, qosManager, func(cmd map[string]interface{}) bool { return true })
 	funcs := aiOrch.ExposeFunctions()
-	funcs["auto_dev"] = autoDev
+
 	funcs["security_advisor"] = secAdvisor
-	funcs["sandbox"] = sandbox
 	funcs["service_monitor"] = serviceMon
 	funcs["location_manager"] = locationMgr
 	funcs["predictive_scaler"] = scaler
 	funcs["identity_federation"] = idFed
-	funcs["marketplace"] = market
 	funcs["simulator_policy"] = simPolicy
 	funcs["quantum_accelerator"] = qsa
-	funcs["sdn_controller"] = sdn
+
 	funcs["attestation_manager"] = attestation
 	funcs["billing_engine"] = billingEngine
 	funcs["data_residency"] = dataResidency
