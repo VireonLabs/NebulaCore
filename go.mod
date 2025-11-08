@@ -105,26 +105,3 @@ require (
 	google.golang.org/protobuf v1.36.10 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
-
-replace github.com/Aurionex/NebulaCore/aggregation => ./internal/aggregation
-replace github.com/Aurionex/NebulaCore/ai => ./internal/ai
-replace github.com/Aurionex/NebulaCore/connectors => ./connectors
-replace github.com/Aurionex/NebulaCore/microtasking => ./internal/microtasking
-replace github.com/Aurionex/NebulaCore/qos => ./internal/qos
-replace github.com/Aurionex/NebulaCore/scheduler => ./internal/scheduler
-replace github.com/Aurionex/NebulaCore/selfhealing => ./internal/selfhealing
-replace github.com/Aurionex/NebulaCore/storage => ./internal/storage
-replace github.com/Aurionex/NebulaCore/telemetry => ./internal/telemetry
-
-replace github.com/Aurionex/NebulaCore/internal/auto_development => ./internal/auto_development
-replace github.com/Aurionex/NebulaCore/internal/security => ./internal/security
-replace github.com/Aurionex/NebulaCore/internal/billing => ./internal/billing
-replace github.com/Aurionex/NebulaCore/internal/geo => ./internal/geo
-replace github.com/Aurionex/NebulaCore/internal/identity => ./internal/identity
-replace github.com/Aurionex/NebulaCore/internal/marketplace => ./internal/marketplace
-replace github.com/Aurionex/NebulaCore/internal/monitoring => ./internal/monitoring
-replace github.com/Aurionex/NebulaCore/internal/network => ./internal/network
-replace github.com/Aurionex/NebulaCore/internal/policy => ./internal/policy
-replace github.com/Aurionex/NebulaCore/internal/quantum => ./internal/quantum
-replace github.com/Aurionex/NebulaCore/internal/scaling => ./internal/scaling
-replace github.com/Aurionex/NebulaCore/internal/testing => ./internal/testing
