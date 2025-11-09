@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Aurionex/NebulaCore/ai"
+	"github.com/Aurionex/NebulaCore/internal/ai"
 	"github.com/Aurionex/NebulaCore/connectors"
 
 	"github.com/Aurionex/NebulaCore/internal/aggregation"
