@@ -1,6 +1,6 @@
 module github.com/Aurionex/NebulaCore
 
-go 1.20
+go 1.24
 
 require (
 	github.com/Knetic/govaluate v3.0.0+incompatible
