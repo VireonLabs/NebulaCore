@@ -52,19 +52,22 @@ jobs:
           echo "go_mod_paths_json=[]" >> $GITHUB_OUTPUT
           echo "has_go_sum=false" >> $GITHUB_OUTPUT
 
-          # Node / frontend detection
+          # Node / frontend detection (first match)
           pkg_json=$(find . -type f -name 'package.json' -not -path "./.git/*" -print -quit || true)
           if [ -n "$pkg_json" ]; then
             dir=$(dirname "$pkg_json")
             dir="${dir#./}"
-            [ -z "$dir" ] && dir="."
+            if [ -z "$dir" ]; then dir="."; fi
             echo "has_node=true" >> $GITHUB_OUTPUT
             echo "node_dir=$dir" >> $GITHUB_OUTPUT
           fi
 
-          # lockfile detection
+          # lockfile detection (global)
           lock=$(find . -type f \( -name 'package-lock.json' -o -name 'yarn.lock' -o -name 'npm-shrinkwrap.json' \) -not -path "./.git/*" -print -quit || true)
-          [ -n "$lock" ] && echo "pkg_lock=${lock#./}" >> $GITHUB_OUTPUT
+          if [ -n "$lock" ]; then
+            lock="${lock#./}"
+            echo "pkg_lock=$lock" >> $GITHUB_OUTPUT
+          fi
 
           # Python detection
           pyreq=$(find . -type f -name 'requirements.txt' -not -path "./.git/*" -print -quit || true)
@@ -73,13 +76,15 @@ jobs:
             echo "has_python=true" >> $GITHUB_OUTPUT
           fi
 
-          # web special-case
+          # web/ special-case
           if [ -d "web" ] || [ -f "web/package.json" ]; then
             echo "has_web=true" >> $GITHUB_OUTPUT
-            [ -z "${pkg_json:-}" ] && echo "node_dir=web" >> $GITHUB_OUTPUT
+            if [ -z "${pkg_json:-}" ]; then
+              echo "node_dir=web" >> $GITHUB_OUTPUT
+            fi
           fi
 
-          # Go modules
+          # Go modules (collect all go.mod paths)
           mapfile -t mods < <(find . -type f -name 'go.mod' -not -path "./.git/*" -print || true)
           if [ "${#mods[@]}" -gt 0 ]; then
             echo "has_go=true" >> $GITHUB_OUTPUT
@@ -90,16 +95,25 @@ jobs:
             for m in "${mods[@]}"; do
               d=$(dirname "$m")
               d="${d#./}"
-              [ -z "$d" ] && d="."
+              if [ -z "$d" ]; then d="."; fi
               dirs="${dirs} ${d}"
-              if $first; then json="${json}\"${d}\""; first=false; else json="${json},\"${d}\""; fi
-              [ -f "${d}/go.sum" ] || ([ "$d" = "." ] && [ -f "go.sum" ]) && any_sum=true
+              if [ "$first" = true ]; then
+                json="${json}\"${d}\""
+                first=false
+              else
+                json="${json},\"${d}\""
+              fi
+              if [ -f "${d}/go.sum" ] || ( [ "$d" = "." ] && [ -f "go.sum" ] ); then
+                any_sum=true
+              fi
             done
             json="${json}]"
             dirs="${dirs#"${dirs%%[! ]*}"}"
             echo "go_mod_paths=$dirs" >> $GITHUB_OUTPUT
             echo "go_mod_paths_json=$json" >> $GITHUB_OUTPUT
-            [ "$any_sum" = true ] && echo "has_go_sum=true" >> $GITHUB_OUTPUT
+            if [ "$any_sum" = true ]; then
+              echo "has_go_sum=true" >> $GITHUB_OUTPUT
+            fi
           fi
 
   build-go:
@@ -111,9 +125,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure git for private Go modules
+      - name: Configure git to access private Go modules
         run: |
-          git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadof "https://github.com/"
+          git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
           go env -w GOPRIVATE=github.com/Aurionex/*
 
       - name: Setup Go
@@ -121,34 +135,54 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - name: Run safe Go import fixer
-        run: |
-          GOFLAGS="" go run ./tools/fiximports.go || echo "[!] fiximports failed"
-
-      - name: Build & Test all Go modules safely
+      - name: Install jq (if needed) and build modules + explicit cmd binaries
         run: |
           set -euo pipefail
           printf '%s' "${{ needs.setup.outputs.go_mod_paths_json }}" > /tmp/go_mods.json
-          mapfile -t mods < <(jq -r '.[]' /tmp/go_mods.json || true)
-          [ "${#mods[@]}" -eq 0 ] && mods=(".")
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update -y
+            sudo apt-get install -y jq
+          fi
+
+          # convert json array to bash array
+          mapfile -t mods < <(jq -r '.[]' /tmp/go_mods.json 2>/dev/null || true)
+          if [ "${#mods[@]}" -eq 0 ]; then
+            mods=(".")
+          fi
+
           echo "Detected Go modules: ${mods[*]}"
           for d in "${mods[@]}"; do
+            if [ -z "$d" ] || [ "$d" = "." ]; then d="."; fi
+            echo ">>> Processing Go module: '$d'"
             cd "$d"
-            export GOMOD=$(pwd)/go.mod
+            # ensure dependencies are tidy and available
             go mod tidy
             go mod download
+            # run tests
             go test ./... -v
+
+            # Build each cmd sub-binary explicitly (preferred for CodeQL and clear logs)
             if [ -d "cmd" ]; then
+              echo "Found cmd/ directory; building each sub-binary separately..."
               mkdir -p ./build/bin
               for binpath in cmd/*; do
-                [ -d "$binpath" ] || continue
-                [ -n "$(ls $binpath/*.go 2>/dev/null)" ] || continue
-                out="./build/bin/${d//\//_}-$(basename $binpath)"
-                go build -mod=mod -o "$out" ./cmd/"$(basename $binpath)"
+                if [ -d "$binpath" ]; then
+                  name=$(basename "$binpath")
+                  # ensure at least one .go file exists (and typically package main)
+                  if compgen -G "$binpath/*.go" > /dev/null; then
+                    echo "Building binary: $name (module: $d)"
+                    # output per-module to avoid collisions
+                    out="./build/bin/${d//\//_}-${name}"
+                    go build -v -o "$out" ./cmd/"$name"
+                    echo "-> wrote $out"
+                  fi
+                fi
               done
             else
-              go build -mod=mod ./...
+              echo "No cmd/ found; falling back to module-wide build"
+              go build ./...
             fi
+
             cd - >/dev/null
           done
 
@@ -165,6 +199,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Lint & Bandit
         run: |
+          set -euo pipefail
           pip install --upgrade pip
           pip install flake8 bandit || true
           flake8 .
@@ -176,23 +211,40 @@ jobs:
     needs: setup
     if: ${{ needs.setup.outputs.has_node == 'true' || needs.setup.outputs.has_web == 'true' }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Setup Node
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node (with cache)
+        if: ${{ needs.setup.outputs.pkg_lock != '' }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
+          # pass explicit path to lockfile inside detected node_dir (improves caching when frontend is in subfolder)
           cache-dependency-path: ${{ needs.setup.outputs.node_dir }}/package-lock.json
-      - run: |
+
+      - name: Setup Node (no cache)
+        if: ${{ needs.setup.outputs.pkg_lock == '' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install frontend deps and build (uses detected node_dir)
+        run: |
+          set -euo pipefail
           dir="${{ needs.setup.outputs.node_dir }}"
-          [ -z "$dir" ] && dir="."
+          if [ -z "$dir" ] || [ "$dir" = "." ]; then dir="."; fi
+          echo "Using frontend dir: $dir"
           cd "$dir"
           if [ -f package-lock.json ] || [ -f yarn.lock ] || [ -f npm-shrinkwrap.json ]; then
+            echo "Running install with lockfile present"
             npm ci --no-audit --no-fund
           else
+            echo "Running install without lockfile"
             npm install --no-audit --no-fund
           fi
           npm run build --if-present
+          echo "Running tests if available..."
           npm test --if-present || echo "No tests found."
 
   codeql:
@@ -203,38 +255,68 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: github/codeql-action/init@v3
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
         with:
           languages: "go, python, javascript"
-      - name: Prepare Go build for CodeQL
+
+      - name: Prepare Go build for CodeQL (explicit per-cmd build)
         if: ${{ needs.setup.outputs.has_go == 'true' }}
         run: |
+          set -euo pipefail
           printf '%s' "${{ needs.setup.outputs.go_mod_paths_json }}" > /tmp/go_mods.json
-          mapfile -t mods < <(jq -r '.[]' /tmp/go_mods.json || true)
-          [ "${#mods[@]}" -eq 0 ] && mods=(".")
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update -y
+            sudo apt-get install -y jq
+          fi
+          mapfile -t mods < <(jq -r '.[]' /tmp/go_mods.json 2>/dev/null || true)
+          if [ "${#mods[@]}" -eq 0 ]; then
+            mods=(".")
+          fi
+          echo "Preparing CodeQL build for modules: ${mods[*]}"
           for d in "${mods[@]}"; do
+            if [ -z "$d" ] || [ "$d" = "." ]; then d="."; fi
+            echo "-> $d"
             cd "$d"
-            export GOMOD=$(pwd)/go.mod
+            # show environment for debugging CodeQL builds
+            go env
+
+            # ensure tidy + download (CodeQL benefits from deterministic vendor/cache)
             go mod tidy
             go mod download
-            go test ./... -v || echo "Some tests failed"
+
+            # run tests (some projects need tests to prepare generated code)
+            go test ./... -v || echo "Some tests failed but continuing CodeQL prep"
+
+            # Build cmd/* binaries explicitly (same logic as build-go)
             if [ -d "cmd" ]; then
               mkdir -p ./codeql_build/bin
               for binpath in cmd/*; do
-                [ -d "$binpath" ] || continue
-                [ -n "$(ls $binpath/*.go 2>/dev/null)" ] || continue
-                out="./codeql_build/bin/${d//\//_}-$(basename $binpath)"
-                go build -mod=mod -o "$out" ./cmd/"$(basename $binpath)"
+                if [ -d "$binpath" ]; then
+                  name=$(basename "$binpath")
+                  if compgen -G "$binpath/*.go" > /dev/null; then
+                    out="./codeql_build/bin/${d//\//_}-${name}"
+                    echo "CodeQL build: $out"
+                    go build -v -o "$out" ./cmd/"$name"
+                    echo "-> $out"
+                  fi
+                fi
               done
             else
-              go build -mod=mod ./...
+              # fallback: module-wide build
+              go build ./...
             fi
+
             cd - >/dev/null
           done
-      - uses: github/codeql-action/analyze@v3
+
+      - name: Run CodeQL analysis
+        uses: github/codeql-action/analyze@v3
         with:
-          upload: "false"
+          upload: "false"   # 🚫 إيقاف رفع نتائج التحليل (لن يرسلها إلى GitHub Security)
 
   summary:
     name: Summary Report
@@ -242,10 +324,13 @@ jobs:
     needs: setup
     if: always()
     steps:
-      - run: |
-          echo "✅ CI completed for $GITHUB_REPOSITORY"
+      - name: Print basic CI summary
+        run: |
+          echo "✅ CI completed (or finished with logs) for $GITHUB_REPOSITORY"
+          echo "Run ID: $GITHUB_RUN_ID"
           echo "Detected: has_go=${{ needs.setup.outputs.has_go }}, has_go_sum=${{ needs.setup.outputs.has_go_sum }}, has_node=${{ needs.setup.outputs.has_node }}, node_dir=${{ needs.setup.outputs.node_dir }}, pkg_lock=${{ needs.setup.outputs.pkg_lock }}"
-      - run: |
+      - name: Upload summary to GitHub Steps Summary
+        run: |
           echo "### ✅ CI Summary" >> $GITHUB_STEP_SUMMARY
           echo "- Go detected: ${{ needs.setup.outputs.has_go }}" >> $GITHUB_STEP_SUMMARY
           echo "- Go sum present: ${{ needs.setup.outputs.has_go_sum }}" >> $GITHUB_STEP_SUMMARY
