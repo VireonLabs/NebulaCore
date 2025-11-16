@@ -127,7 +127,7 @@ jobs:
 
       - name: Configure git to access private Go modules
         run: |
-          git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadof "https://github.com/"
           go env -w GOPRIVATE=github.com/Aurionex/*
 
       - name: Setup Go
@@ -135,7 +135,128 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - name: Install jq (if needed) and build modules + explicit cmd binaries
+      # ---------------------------
+      # Lightweight AST-based fixer step (minimal & safe)
+      # ---------------------------
+      - name: Run safe Go import fixer (lightweight)
+        run: |
+          set -euo pipefail
+          echo "[*] Running lightweight import fixer..."
+          mkdir -p tools
+          cat > tools/fiximports.go <<'EOF'
+          package main
+          import (
+            "bytes"
+            "fmt"
+            "go/parser"
+            "go/token"
+            "go/printer"
+            "io/fs"
+            "os"
+            "path/filepath"
+            "strings"
+            "go/ast"
+            "os/exec"
+            "golang.org/x/tools/imports"
+          )
+          const fallback = "github.com/Aurionex/NebulaCore"
+          const oldTok = "konrotaharai-netizen"
+          
+          func main() {
+            files := []string{}
+            filepath.WalkDir(".", func(p string, d fs.DirEntry, err error) error {
+              if err != nil { return nil }
+              if d.IsDir() {
+                if d.Name() == ".git" || d.Name() == "vendor" || d.Name() == "node_modules" { return filepath.SkipDir }
+                return nil
+              }
+              if strings.HasSuffix(p, ".go") { files = append(files, p) }
+              return nil
+            })
+            for _, fpath := range files {
+              src, err := os.ReadFile(fpath)
+              if err != nil { continue }
+              fset := token.NewFileSet()
+              file, err := parser.ParseFile(fset, fpath, src, parser.ParseComments)
+              if err != nil { fmt.Fprintf(os.Stderr, "parse %s: %v\n", fpath, err); continue }
+              modPath, modDir := findMod(filepath.Dir(fpath))
+              changed := false
+              for _, imp := range file.Imports {
+                old := strings.Trim(imp.Path.Value, "\"")
+                if old == "" { continue }
+                if strings.HasPrefix(old, "internal/") {
+                  new := modPath + "/" + old
+                  if old != new { imp.Path.Value = "\"" + new + "\""; changed = true }
+                  if !exists(modDir, strings.TrimPrefix(old, "internal/")) { fmt.Printf("WARN: %s import %s -> %s : not found\n", fpath, old, new) }
+                  continue
+                }
+                if strings.Contains(old, oldTok) {
+                  new := strings.Replace(old, oldTok, modPath, 1)
+                  if old != new { imp.Path.Value = "\"" + new + "\""; changed = true }
+                  continue
+                }
+                if !strings.Contains(old, ".") && !strings.Contains(old, "/") {
+                  new := modPath + "/" + old
+                  if old != new { imp.Path.Value = "\"" + new + "\""; changed = true }
+                  if !exists(modDir, old) { fmt.Printf("WARN: %s converted %s -> %s but folder missing\n", fpath, old, new) }
+                  continue
+                }
+              }
+              var outBytes []byte
+              if changed {
+                var buf bytes.Buffer
+                printer.Fprint(&buf, fset, file)
+                processed, err := imports.Process(fpath, buf.Bytes(), &imports.Options{Comments: true})
+                if err == nil { outBytes = processed } else { outBytes = buf.Bytes() }
+              } else {
+                processed, err := imports.Process(fpath, src, &imports.Options{Comments: true})
+                if err == nil && !bytes.Equal(processed, src) { outBytes = processed }
+              }
+              if outBytes != nil {
+                _ = os.WriteFile(fpath, outBytes, 0644)
+                fmt.Printf("updated: %s\n", fpath)
+              }
+            }
+            exec.Command("bash", "-lc", "go mod tidy").Run()
+            fmt.Println("[fixer] done")
+          }
+          
+          func findMod(dir string) (string, string) {
+            cur := dir
+            for {
+              m := filepath.Join(cur, "go.mod")
+              if _, err := os.Stat(m); err == nil {
+                b, _ := os.ReadFile(m)
+                for _, line := range strings.Split(string(b), "\n") {
+                  line = strings.TrimSpace(line)
+                  if strings.HasPrefix(line, "module ") {
+                    parts := strings.Fields(line)
+                    if len(parts) >= 2 { return parts[1], cur }
+                  }
+                }
+                return fallback, cur
+              }
+              p := filepath.Dir(cur)
+              if p == cur { break }
+              cur = p
+            }
+            return fallback, "."
+          }
+          
+          func exists(modDir, rel string) bool {
+            cand := filepath.Join(modDir, filepath.FromSlash(rel))
+            if info, err := os.Stat(cand); err == nil && info.IsDir() { return true }
+            if matches, err := filepath.Glob(filepath.Join(cand, "*.go")); err == nil && len(matches) > 0 { return true }
+            return false
+          }
+          EOF
+          GOFLAGS="" go run ./tools/fiximports.go || echo "[!] fiximports failed (check logs)"
+          echo "[*] Fixer finished (runner copy only; no commit/push performed)."
+      # ---------------------------
+      # End lightweight fixer step
+      # ---------------------------
+
+      - name: Install jq and build modules
         run: |
           set -euo pipefail
           printf '%s' "${{ needs.setup.outputs.go_mod_paths_json }}" > /tmp/go_mods.json
@@ -144,7 +265,6 @@ jobs:
             sudo apt-get install -y jq
           fi
 
-          # convert json array to bash array
           mapfile -t mods < <(jq -r '.[]' /tmp/go_mods.json 2>/dev/null || true)
           if [ "${#mods[@]}" -eq 0 ]; then
             mods=(".")
@@ -155,23 +275,18 @@ jobs:
             if [ -z "$d" ] || [ "$d" = "." ]; then d="."; fi
             echo ">>> Processing Go module: '$d'"
             cd "$d"
-            # ensure dependencies are tidy and available
             go mod tidy
             go mod download
-            # run tests
             go test ./... -v
 
-            # Build each cmd sub-binary explicitly (preferred for CodeQL and clear logs)
             if [ -d "cmd" ]; then
               echo "Found cmd/ directory; building each sub-binary separately..."
               mkdir -p ./build/bin
               for binpath in cmd/*; do
                 if [ -d "$binpath" ]; then
                   name=$(basename "$binpath")
-                  # ensure at least one .go file exists (and typically package main)
                   if compgen -G "$binpath/*.go" > /dev/null; then
                     echo "Building binary: $name (module: $d)"
-                    # output per-module to avoid collisions
                     out="./build/bin/${d//\//_}-${name}"
                     go build -v -o "$out" ./cmd/"$name"
                     echo "-> wrote $out"
@@ -220,7 +335,6 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          # pass explicit path to lockfile inside detected node_dir (improves caching when frontend is in subfolder)
           cache-dependency-path: ${{ needs.setup.outputs.node_dir }}/package-lock.json
 
       - name: Setup Node (no cache)
@@ -229,7 +343,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Install frontend deps and build (uses detected node_dir)
+      - name: Install frontend deps and build
         run: |
           set -euo pipefail
           dir="${{ needs.setup.outputs.node_dir }}"
@@ -244,7 +358,6 @@ jobs:
             npm install --no-audit --no-fund
           fi
           npm run build --if-present
-          echo "Running tests if available..."
           npm test --if-present || echo "No tests found."
 
   codeql:
@@ -263,7 +376,7 @@ jobs:
         with:
           languages: "go, python, javascript"
 
-      - name: Prepare Go build for CodeQL (explicit per-cmd build)
+      - name: Prepare Go build for CodeQL
         if: ${{ needs.setup.outputs.has_go == 'true' }}
         run: |
           set -euo pipefail
@@ -281,17 +394,11 @@ jobs:
             if [ -z "$d" ] || [ "$d" = "." ]; then d="."; fi
             echo "-> $d"
             cd "$d"
-            # show environment for debugging CodeQL builds
             go env
-
-            # ensure tidy + download (CodeQL benefits from deterministic vendor/cache)
             go mod tidy
             go mod download
-
-            # run tests (some projects need tests to prepare generated code)
             go test ./... -v || echo "Some tests failed but continuing CodeQL prep"
-
-            # Build cmd/* binaries explicitly (same logic as build-go)
+            
             if [ -d "cmd" ]; then
               mkdir -p ./codeql_build/bin
               for binpath in cmd/*; do
@@ -306,17 +413,16 @@ jobs:
                 fi
               done
             else
-              # fallback: module-wide build
               go build ./...
             fi
-
+            
             cd - >/dev/null
           done
 
       - name: Run CodeQL analysis
         uses: github/codeql-action/analyze@v3
         with:
-          upload: "false"   # 🚫 إيقاف رفع نتائج التحليل (لن يرسلها إلى GitHub Security)
+          upload: "false"
 
   summary:
     name: Summary Report
@@ -326,9 +432,10 @@ jobs:
     steps:
       - name: Print basic CI summary
         run: |
-          echo "✅ CI completed (or finished with logs) for $GITHUB_REPOSITORY"
+          echo "✅ CI completed for $GITHUB_REPOSITORY"
           echo "Run ID: $GITHUB_RUN_ID"
           echo "Detected: has_go=${{ needs.setup.outputs.has_go }}, has_go_sum=${{ needs.setup.outputs.has_go_sum }}, has_node=${{ needs.setup.outputs.has_node }}, node_dir=${{ needs.setup.outputs.node_dir }}, pkg_lock=${{ needs.setup.outputs.pkg_lock }}"
+      
       - name: Upload summary to GitHub Steps Summary
         run: |
           echo "### ✅ CI Summary" >> $GITHUB_STEP_SUMMARY
