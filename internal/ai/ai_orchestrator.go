@@ -13,32 +13,32 @@ import (
 	"sync"
 	"time"
 
-	// Core subsystems
-	"aggregation"
-	"scheduler"
-	"storage"
-	"microtasking"
-	"telemetry"
-	"security"
-	"communication"
-	"training"
-	"qos"
-	"selfhealing"
+// Core subsystems
+"github.com/Aurionex/NebulaCore/aggregation"
+"scheduler"
+"storage"
+"microtasking"
+"telemetry"
+"security"
+"github.com/Aurionex/NebulaCore/communication"
+"training"
+"qos"
+"selfhealing"
 
-	// Advanced/Optional Modules (lazy-init in DirectMode)
-	"internal/auto_development"
-	"internal/monitoring"
-	"internal/geo"
-	"internal/scaling"
-	"internal/identity"
-	"internal/marketplace"
-	"internal/policy"
-	"internal/quantum"
-	"internal/network"
-	"internal/billing"
+// Advanced/Optional Modules (lazy-init in DirectMode)
+"github.com/Aurionex/NebulaCore/internal/auto_development"
+"github.com/Aurionex/NebulaCore/internal/monitoring"
+"github.com/Aurionex/NebulaCore/internal/geo"
+"github.com/Aurionex/NebulaCore/internal/scaling"
+"github.com/Aurionex/NebulaCore/internal/identity"
+"github.com/Aurionex/NebulaCore/internal/marketplace"
+"github.com/Aurionex/NebulaCore/internal/policy"
+"github.com/Aurionex/NebulaCore/internal/quantum"
+"github.com/Aurionex/NebulaCore/internal/network"
+"github.com/Aurionex/NebulaCore/internal/billing"
 
-	// Connectors system
-	"connectors"
+// Connectors system
+"github.com/Aurionex/NebulaCore/connectors"
 )
 
 // -----------------------------------------------------------------------------
