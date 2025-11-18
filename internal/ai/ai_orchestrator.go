@@ -15,15 +15,15 @@ import (
 
 // Core subsystems
 "github.com/Aurionex/NebulaCore/internal/aggregation"
-"scheduler"
-"storage"
-"microtasking"
-"telemetry"
-"security"
+"github.com/Aurionex/NebulaCore/internal/scheduler"
+"github.com/Aurionex/NebulaCore/internal/storage"
+"github.com/Aurionex/NebulaCore/internal/microtasking"
+"github.com/Aurionex/NebulaCore/internal/telemetry"
+"github.com/Aurionex/NebulaCore/internal/security"
 "github.com/Aurionex/NebulaCore/internal/communication"
-"training"
-"qos"
-"selfhealing"
+"github.com/Aurionex/NebulaCore/internal/training"
+"github.com/Aurionex/NebulaCore/internal/qos"
+"github.com/Aurionex/NebulaCore/internal/selfhealing"
 
 // Advanced/Optional Modules (lazy-init in DirectMode)
 "github.com/Aurionex/NebulaCore/internal/auto_development"
