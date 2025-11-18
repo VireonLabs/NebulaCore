@@ -14,13 +14,13 @@ import (
 	"time"
 
 // Core subsystems
-"github.com/Aurionex/NebulaCore/aggregation"
+"github.com/Aurionex/NebulaCore/internal/aggregation"
 "scheduler"
 "storage"
 "microtasking"
 "telemetry"
 "security"
-"github.com/Aurionex/NebulaCore/communication"
+"github.com/Aurionex/NebulaCore/internal/communication"
 "training"
 "qos"
 "selfhealing"
