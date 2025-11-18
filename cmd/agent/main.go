@@ -18,8 +18,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
-
-	"internal/ai"
+    
+	"github.com/Aurionex/NebulaCore/internal/ai"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
