@@ -35,7 +35,7 @@ jobs:
       has_go_sum: ${{ steps.detect.outputs.has_go_sum }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - id: detect
         name: Detect languages and important files (recursive)
@@ -123,7 +123,7 @@ jobs:
     if: ${{ needs.setup.outputs.has_go == 'true' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Configure git to access private Go modules
         run: |
@@ -192,7 +192,7 @@ jobs:
     needs: setup
     if: ${{ needs.setup.outputs.has_python == 'true' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -212,7 +212,7 @@ jobs:
     if: ${{ needs.setup.outputs.has_node == 'true' || needs.setup.outputs.has_web == 'true' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node (with cache)
         if: ${{ needs.setup.outputs.pkg_lock != '' }}
@@ -256,7 +256,7 @@ jobs:
       security-events: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
