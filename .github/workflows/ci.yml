@@ -337,3 +337,4 @@ jobs:
           echo "- Node detected: ${{ needs.setup.outputs.has_node }}" >> $GITHUB_STEP_SUMMARY
           echo "- Node dir: ${{ needs.setup.outputs.node_dir }}" >> $GITHUB_STEP_SUMMARY
           echo "- Package lock path: ${{ needs.setup.outputs.pkg_lock }}" >> $GITHUB_STEP_SUMMARY
+          
