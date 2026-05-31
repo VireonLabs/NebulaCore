@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	"konrotaharai-netizen/internal/secstore"
+	"github.com/Aurionex/NebulaCore/internal/secstore"
 )
 
 // DetectEnv يكتشف تلقائياً متغيرات البيئة الأساسية

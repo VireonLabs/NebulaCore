@@ -53,8 +53,8 @@ type SimulationReport struct {
 	OK       bool     `json:"ok"`
 }
 
-// AuditEvent for policy changes and applications
-type AuditEvent struct {
+// IsolationAuditEvent for policy changes and applications
+type IsolationAuditEvent struct {
 	Time     time.Time `json:"time"`
 	Actor    string    `json:"actor,omitempty"`
 	Action   string    `json:"action"`
@@ -72,7 +72,7 @@ type IsolationManager struct {
 	policies  map[string]IsolationPolicy // policyID -> policy
 	mode      string                    // "simulate" or "enforce"
 	enforcers map[IsolationType]Enforcer
-	audit     []AuditEvent
+	audit     []IsolationAuditEvent
 	auditMu   sync.RWMutex
 	storeDir  string
 }
@@ -83,7 +83,7 @@ func NewIsolationManager(storeDir string) *IsolationManager {
 		policies:  map[string]IsolationPolicy{},
 		mode:      "simulate",
 		enforcers: map[IsolationType]Enforcer{},
-		audit:     []AuditEvent{},
+		audit:     []IsolationAuditEvent{},
 		storeDir:  storeDir,
 	}
 	// create dir
@@ -139,22 +139,22 @@ func (im *IsolationManager) loadPoliciesFromDisk() error {
 
 // ---- Audit helpers ----
 
-func (im *IsolationManager) addAudit(a AuditEvent) {
+func (im *IsolationManager) addAudit(a IsolationAuditEvent) {
 	im.auditMu.Lock()
 	im.audit = append(im.audit, a)
 	im.auditMu.Unlock()
 }
 
 // ListAudit returns audit events for a target (empty target returns all)
-func (im *IsolationManager) ListAudit(targetID string) []AuditEvent {
+func (im *IsolationManager) ListAudit(targetID string) []IsolationAuditEvent {
 	im.auditMu.RLock()
 	defer im.auditMu.RUnlock()
 	if targetID == "" {
-		cp := make([]AuditEvent, len(im.audit))
+		cp := make([]IsolationAuditEvent, len(im.audit))
 		copy(cp, im.audit)
 		return cp
 	}
-	out := []AuditEvent{}
+	out := []IsolationAuditEvent{}
 	for _, e := range im.audit {
 		if e.TargetID == targetID {
 			out = append(out, e)
@@ -206,7 +206,7 @@ func (im *IsolationManager) CreatePolicy(p IsolationPolicy, actor string) error 
 	}
 	im.policies[p.ID] = p
 	_ = im.persistPoliciesToDisk()
-	im.addAudit(AuditEvent{Time: time.Now(), Actor: actor, Action: "create_policy", PolicyID: p.ID, Detail: "created"})
+	im.addAudit(IsolationAuditEvent{Time: time.Now(), Actor: actor, Action: "create_policy", PolicyID: p.ID, Detail: "created"})
 	return nil
 }
 
@@ -222,7 +222,7 @@ func (im *IsolationManager) UpdatePolicy(id string, p IsolationPolicy, actor str
 	p.UpdatedAt = time.Now()
 	im.policies[id] = p
 	_ = im.persistPoliciesToDisk()
-	im.addAudit(AuditEvent{Time: time.Now(), Actor: actor, Action: "update_policy", PolicyID: id})
+	im.addAudit(IsolationAuditEvent{Time: time.Now(), Actor: actor, Action: "update_policy", PolicyID: id})
 	return nil
 }
 
@@ -251,7 +251,7 @@ func (im *IsolationManager) DeletePolicy(id string, actor string) error {
 	}
 	delete(im.policies, id)
 	_ = im.persistPoliciesToDisk()
-	im.addAudit(AuditEvent{Time: time.Now(), Actor: actor, Action: "delete_policy", PolicyID: id})
+	im.addAudit(IsolationAuditEvent{Time: time.Now(), Actor: actor, Action: "delete_policy", PolicyID: id})
 	return nil
 }
 
@@ -264,7 +264,7 @@ func (im *IsolationManager) SetMode(mode string) error {
 	im.mu.Lock()
 	im.mode = mode
 	im.mu.Unlock()
-	im.addAudit(AuditEvent{Time: time.Now(), Action: "set_mode", Detail: mode})
+	im.addAudit(IsolationAuditEvent{Time: time.Now(), Action: "set_mode", Detail: mode})
 	return nil
 }
 
@@ -303,7 +303,7 @@ func (im *IsolationManager) ApplyPolicy(ctx context.Context, targetID string, po
 	// simulate first if mode is simulate
 	if mode == "simulate" {
 		rep, _ := im.EvaluatePolicy(targetID, p)
-		im.addAudit(AuditEvent{Time: time.Now(), Actor: actor, Action: "apply_policy_simulate", TargetID: targetID, PolicyID: policyID, Detail: fmt.Sprintf("%+v", rep)})
+		im.addAudit(IsolationAuditEvent{Time: time.Now(), Actor: actor, Action: "apply_policy_simulate", TargetID: targetID, PolicyID: policyID, Detail: fmt.Sprintf("%+v", rep)})
 		return nil
 	}
 	// enforce path uses enforcer and waits for completion
@@ -320,10 +320,10 @@ func (im *IsolationManager) ApplyPolicy(ctx context.Context, targetID string, po
 		return ctx.Err()
 	case err := <-errCh:
 		if err != nil {
-			im.addAudit(AuditEvent{Time: time.Now(), Actor: actor, Action: "apply_policy_failed", TargetID: targetID, PolicyID: policyID, Detail: err.Error()})
+			im.addAudit(IsolationAuditEvent{Time: time.Now(), Actor: actor, Action: "apply_policy_failed", TargetID: targetID, PolicyID: policyID, Detail: err.Error()})
 			return err
 		}
-		im.addAudit(AuditEvent{Time: time.Now(), Actor: actor, Action: "apply_policy_enforced", TargetID: targetID, PolicyID: policyID})
+		im.addAudit(IsolationAuditEvent{Time: time.Now(), Actor: actor, Action: "apply_policy_enforced", TargetID: targetID, PolicyID: policyID})
 		return nil
 	}
 }
@@ -333,7 +333,7 @@ func (im *IsolationManager) RegisterEnforcer(itype IsolationType, f Enforcer) {
 	im.mu.Lock()
 	im.enforcers[itype] = f
 	im.mu.Unlock()
-	im.addAudit(AuditEvent{Time: time.Now(), Action: "register_enforcer", Detail: string(itype)})
+	im.addAudit(IsolationAuditEvent{Time: time.Now(), Action: "register_enforcer", Detail: string(itype)})
 }
 
 // SnapshotPolicies returns JSON snapshot of policies

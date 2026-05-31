@@ -4,8 +4,15 @@ import (
 	"context"
 	"fmt"
 
-	"konrotaharai-netizen/internal/transit"
+	"github.com/Aurionex/NebulaCore/transit/pkg/transit"
 )
+type KMSWrapper interface {
+	Wrap(ctx context.Context, kekID string, dek []byte) ([]byte, string, error)
+	Unwrap(ctx context.Context, kekID string, wrapped []byte) ([]byte, error)
+	Sign(ctx context.Context, keyID string, data []byte) ([]byte, error)
+	Verify(ctx context.Context, keyID string, data []byte, sig []byte) (bool, error)
+	Info() map[string]string
+}
 
 // PKCS11KMSAdapter adapts transit.PKCS11 provider to secstore.KMSWrapper interface.
 type PKCS11KMSAdapter struct {

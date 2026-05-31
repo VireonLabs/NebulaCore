@@ -23,7 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"aggregation"
+	"github.com/Aurionex/NebulaCore/internal/aggregation"
 )
 
 // -------------------- Task model --------------------
@@ -50,7 +50,7 @@ type DecisionEntry struct {
 	Time       time.Time              `json:"time"`
 	TaskID     string                 `json:"task_id"`
 	Algo       string                 `json:"algorithm"`
-	Requested  map[string]float64     `json:"requested,omitempty"`
+	Requested  map[aggregation.ResourceType]float64     `json:"requested,omitempty"`
 	AssignedTo string                 `json:"assigned_to,omitempty"`
 	Result     string                 `json:"result"` // "allocated","queued","failed","simulated","allocated_fallback","rejected_by_policy"
 	Reason     string                 `json:"reason,omitempty"`
@@ -408,8 +408,8 @@ func (s *AdvancedScheduler) Schedule(telemetry map[string]any) map[string]string
 	// node snapshot
 	var nodes []*aggregation.ResourceNode
 	if s.rp != nil {
-		s.rp.mu.RLock()
-		for _, n := range s.rp.nodes {
+		s.rp.Mu.RLock()
+		for _, n := range s.rp.Nodes {
 			c := *n
 			c.Resources = copyMapResources(n.Resources)
 			c.Allocated = copyMapResources(n.Allocated)
@@ -417,7 +417,7 @@ func (s *AdvancedScheduler) Schedule(telemetry map[string]any) map[string]string
 			c.Meta = copyMapAny(n.Meta)
 			nodes = append(nodes, &c)
 		}
-		s.rp.mu.RUnlock()
+		s.rp.Mu.RUnlock()
 	}
 
 	// run algorithm
@@ -615,8 +615,8 @@ func (s *AdvancedScheduler) tryFallbacks(taskID, failedNode, origAlgo string, re
 		}
 		var nodes []*aggregation.ResourceNode
 		if s.rp != nil {
-			s.rp.mu.RLock()
-			for _, n := range s.rp.nodes {
+			s.rp.Mu.RLock()
+			for _, n := range s.rp.Nodes {
 				c := *n
 				c.Resources = copyMapResources(n.Resources)
 				c.Allocated = copyMapResources(n.Allocated)
@@ -624,7 +624,7 @@ func (s *AdvancedScheduler) tryFallbacks(taskID, failedNode, origAlgo string, re
 				c.Meta = copyMapAny(n.Meta)
 				nodes = append(nodes, &c)
 			}
-			s.rp.mu.RUnlock()
+			s.rp.Mu.RUnlock()
 		}
 		s.mu.Lock()
 		origTask, ok := s.tasks[taskID]
@@ -704,8 +704,8 @@ func (s *AdvancedScheduler) SimulateAlgorithm(algo SchedulerAlgorithm, telemetry
 
 	var nodes []*aggregation.ResourceNode
 	if s.rp != nil {
-		s.rp.mu.RLock()
-		for _, n := range s.rp.nodes {
+		s.rp.Mu.RLock()
+		for _, n := range s.rp.Nodes {
 			c := *n
 			c.Resources = copyMapResources(n.Resources)
 			c.Allocated = copyMapResources(n.Allocated)
@@ -713,7 +713,7 @@ func (s *AdvancedScheduler) SimulateAlgorithm(algo SchedulerAlgorithm, telemetry
 			c.Meta = copyMapAny(n.Meta)
 			nodes = append(nodes, &c)
 		}
-		s.rp.mu.RUnlock()
+		s.rp.Mu.RUnlock()
 	}
 	decisions, meta, err := algo.Schedule(pending, nodes, telemetry)
 	out := map[string]any{"decisions": decisions, "meta": meta}

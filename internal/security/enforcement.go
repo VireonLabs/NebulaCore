@@ -7,7 +7,11 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/Aurionex/NebulaCore/internal/logging"
 )
+
+type AuditEvent = logging.AuditEvent
 
 // Alert represents an enforcement alert.
 type Alert struct {
@@ -98,23 +102,24 @@ func (e *EnforcementManager) EnforceExecution(ctx context.Context, path string, 
 	}
 	verCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
+
 	okCh := make(chan bool, 1)
 	errCh := make(chan error, 1)
 	go func() {
-		ok, err := e.cosignVerifier.VerifyArtifact(path, path+".sig", "cosign_pub_default")
+		ok, err := e.cosignVerifier.VerifyArtifact(verCtx, path, path+".sig", "cosign-pub")
 		if err != nil {
 			errCh <- err
 			return
 		}
 		okCh <- ok
 	}()
+
 	select {
 	case <-verCtx.Done():
 		if e.FailClosed {
 			e.recordExecutionDenied(path, pid, "signature_timeout")
 			return false
 		}
-		e.reportExecutionWarning(path, pid, "signature_timeout_but_allowed")
 		return true
 	case err := <-errCh:
 		if e.FailClosed {
@@ -165,7 +170,7 @@ func (e *EnforcementManager) reportExecutionWarning(path string, pid int, reason
 	a := Alert{
 		Timestamp: time.Now(),
 		Source:    "enforcement",
-		Severity:  "WARN",
+		Severity:  "WARNING",
 		Message:   msg,
 		Meta:      map[string]string{"path": path, "pid": fmt.Sprintf("%d", pid), "reason": reason},
 	}
@@ -176,11 +181,5 @@ func (e *EnforcementManager) pushAlert(a Alert) error {
 	if e.alertStore != nil {
 		return e.alertStore.Save(a)
 	}
-	log.Printf("[alert-store-fallback] %v", a)
 	return nil
-}
-
-// Shutdown called on coordinator stop
-func (e *EnforcementManager) Shutdown() {
-	// flush persistent queues if any
 }

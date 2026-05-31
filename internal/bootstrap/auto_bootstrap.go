@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"konrotaharai-netizen/internal/security"
+	"github.com/Aurionex/NebulaCore/internal/security"
 )
 
 // TokenValidator validates the AI token (pluggable).

@@ -19,8 +19,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -364,7 +362,7 @@ func (s *SelfHealingManager) ApplyRepair(ctx context.Context, plan RepairPlan, a
 // GeneratePlaybook builds a Playbook from incident using SuggestRepair
 func (s *SelfHealingManager) GeneratePlaybook(incidentID string) (Playbook, error) {
 	s.mu.RLock()
-	inc, ok := s.incidents[incidentID]
+	_, ok := s.incidents[incidentID]
 	s.mu.RUnlock()
 	if !ok {
 		return Playbook{}, errors.New("incident not found")

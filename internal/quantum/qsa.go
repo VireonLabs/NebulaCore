@@ -293,6 +293,7 @@ type surrogateBackendAdapter struct {
 	name   string
 	client SurrogateClient
 }
+func (s *surrogateBackendAdapter) RunStatevector(ctx context.Context, nQubits int, gates []Gate) ([]complex128, error) { return nil, fmt.Errorf("statevector not supported on surrogate") }
 
 func (s *surrogateBackendAdapter) Name() string { return s.name }
 func (s *surrogateBackendAdapter) Supports(qubits int) bool {
@@ -752,7 +753,6 @@ func applyCNOT(state []complex128, nQubits int, control int, target int) {
 	for i := 0; i < N; i++ {
 		if i&cmask != 0 {
 			// flip target bit
-			j := i ^ tmask
 			// swap amplitudes between i and j if target bit differs?
 			// correct operation: amplitude at basis index with control=1 and target=0 moves to control=1,target=1, etc.
 			// Implementation: if target bit is 0, move amplitude to flipped index

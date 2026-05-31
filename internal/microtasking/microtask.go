@@ -501,7 +501,7 @@ func (m *MicroTaskManager) RegisterWorkerHandler(workerID string, buf int, handl
 	go func() {
 		for {
 			select {
-			case <-m.ctx:
+			case <-m.ctx.Done():
 				// manager stopping
 				return
 			case t, ok := <-ch:
@@ -657,7 +657,7 @@ func (m *MicroTaskManager) SliceTask(rootID string, payload map[string]any, numS
 func (m *MicroTaskManager) SubmitTaskCtx(ctx context.Context, rootID string, t *MicroTask) error {
 	// optional auth: allow callers to register an AuthChecker and set a resource/action in ctx if desired.
 	select {
-	case <-m.ctx:
+	case <-m.ctx.Done():
 		return errors.New("manager stopped")
 	case <-ctx.Done():
 		return ctx.Err()
@@ -859,7 +859,7 @@ func (m *MicroTaskManager) chooseWorker() (string, chan *MicroTask) {
 func (m *MicroTaskManager) dispatcher() {
 	for {
 		select {
-		case <-m.ctx:
+		case <-m.ctx.Done():
 			return
 		case t, ok := <-m.events:
 			if !ok {
@@ -875,7 +875,7 @@ func (m *MicroTaskManager) dispatcher() {
 					try++
 					select {
 					case <-time.After(200 * time.Millisecond):
-					case <-m.ctx:
+					case <-m.ctx.Done():
 						return
 					}
 					continue
@@ -887,7 +887,7 @@ func (m *MicroTaskManager) dispatcher() {
 				case <-time.After(1 * time.Second):
 					// couldn't send to chosen worker, maybe full; try again
 					try++
-				case <-m.ctx:
+				case <-m.ctx.Done():
 					return
 				}
 			}
@@ -914,7 +914,7 @@ func (m *MicroTaskManager) dispatcher() {
 				// final fallback: requeue with delay (to avoid task loss)
 				go func(tt *MicroTask) {
 					select {
-					case <-m.ctx:
+					case <-m.ctx.Done():
 						return
 					case <-time.After(500 * time.Millisecond):
 						_ = m.SubmitTaskCtx(m.ctx, tt.ParentID, tt)

@@ -1,15 +1,14 @@
 package transit
 
 import (
-	"bytes"
 	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/sha256"
 	"encoding/asn1"
 	"errors"
 	"fmt"
 	"io"
 	"math/big"
+	crypto_rand "crypto/rand"
 	"strings"
 
 	pkcs11 "github.com/miekg/pkcs11"
@@ -260,6 +259,6 @@ func (p *pkcs11Provider) exportPublicKey() (*ecdsa.PublicKey, error) {
 
 func randomBytes(n int) []byte {
 	b := make([]byte, n)
-	_, _ = io.ReadFull(rand.Reader, b)
+	_, _ = io.ReadFull(crypto_rand.Reader, b)
 	return b
 }

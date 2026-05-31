@@ -14,6 +14,16 @@ import (
 	"golang.org/x/crypto/curve25519"
 )
 
+type Config struct {
+	Backend string
+	PKCS11  struct {
+		Path   string
+		Pin    string
+		SlotID int
+		Label  string
+	}
+}
+
 // CryptoProvider defines operations needed by transit
 type CryptoProvider interface {
 	SealWithRoot(plaintext []byte) ([]byte, error)

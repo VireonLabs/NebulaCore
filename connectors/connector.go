@@ -104,6 +104,23 @@ var (
 	ErrAuthFailed     = errors.New("authentication failed")
 )
 
+func StandardizeResponse(res GatewayResponse) GatewayResponse {
+	if res.Timestamp.IsZero() {
+		res.Timestamp = time.Now()
+	}
+	return res
+}
+
+func ValidateBasicRequest(req *GatewayRequest) error {
+	if req.RequestID == "" {
+		req.RequestID = GenerateRequestID()
+	}
+	if req.ServiceName == "" {
+		return errors.New("missing service name")
+	}
+	return nil
+}
+
 const (
 	ErrorAuthFailed      = 1001
 	ErrorResourceMissing = 2001

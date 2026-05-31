@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"konrotaharai-netizen/internal/secstore"
+	"github.com/Aurionex/NebulaCore/internal/secstore"
 )
 
 // AttestationReport is a signed report of node attestation.

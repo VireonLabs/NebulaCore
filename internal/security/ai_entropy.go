@@ -19,6 +19,7 @@
 package security
 
 import (
+	"context"
 	"crypto/hmac"
 	crand "crypto/rand"
 	"crypto/sha512"
@@ -111,7 +112,7 @@ func NewAIEntropyAlgorithm(opts *AIEntropyOptions) (*AIEntropyAlgorithm, error) 
 		a.state[0] = binary.LittleEndian.Uint64(buf[0:8])
 		a.state[1] = binary.LittleEndian.Uint64(buf[8:16])
 		a.seeded = true
-		zeroBytes(buf)
+		ZeroBytes(buf)
 	} else {
 		// fallback deterministic-but-changing seed (time-derived) — only if CSPRNG missing
 		t := uint64(time.Now().UnixNano())
@@ -124,7 +125,7 @@ func NewAIEntropyAlgorithm(opts *AIEntropyOptions) (*AIEntropyAlgorithm, error) 
 	tmp := make([]byte, a.opts.PoolSize)
 	if _, err := crand.Read(tmp); err == nil {
 		copy(a.pool, tmp)
-		zeroBytes(tmp)
+		ZeroBytes(tmp)
 	} else {
 		// fallback: mix state values into pool
 		for i := 0; i < len(a.pool); i += 8 {
@@ -182,7 +183,7 @@ func spectralBlend(samples []uint64) []byte {
 // GetEntropy collects algorithmic observations and returns bytes + confidence score.
 // Intended to be non-blocking and reasonably fast. Caller (EntropyManager) must apply
 // the confidence-based policy when deciding how many bytes to mix.
-func (a *AIEntropyAlgorithm) GetEntropy(ctx time.Time) (data []byte, confidence float64, err error) {
+func (a *AIEntropyAlgorithm) GetEntropy(ctx context.Context, size int) (data []byte, confidence float64, err error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -221,7 +222,7 @@ func (a *AIEntropyAlgorithm) GetEntropy(ctx time.Time) (data []byte, confidence 
 	// 5) combine observations into "raw material" via HMAC-SHA512
 	h := hmac.New(sha512.New, a.opts.ExtractorLabel)
 	var tbuf [8]byte
-	binary.LittleEndian.PutUint64(tbuf[:], uint64(ctx.UnixNano()))
+	binary.LittleEndian.PutUint64(tbuf[:], uint64(time.Now().UnixNano()))
 	h.Write(tbuf[:])
 
 	var mbuf [40]byte
@@ -241,7 +242,7 @@ func (a *AIEntropyAlgorithm) GetEntropy(ctx time.Time) (data []byte, confidence 
 	if a.opts.EnablePrimeHeuristic {
 		if pBytes, pErr := heuristicPrimeFragment(); pErr == nil && len(pBytes) > 0 {
 			h.Write(pBytes)
-			zeroBytes(pBytes)
+			ZeroBytes(pBytes)
 		}
 	}
 
@@ -273,17 +274,17 @@ func (a *AIEntropyAlgorithm) GetEntropy(ctx time.Time) (data []byte, confidence 
 			if _, rerr := crand.Read(out); rerr == nil {
 				// low confidence fallback
 				conf := 0.15
-				zeroBytes(prngOut)
-				zeroBytes(raw)
-				zeroBytes(poolDigest)
-				zeroBytes(mbuf[:])
+				ZeroBytes(prngOut)
+				ZeroBytes(raw)
+				ZeroBytes(poolDigest)
+				ZeroBytes(mbuf[:])
 				return out, conf, nil
 			}
 		}
-		zeroBytes(prngOut)
-		zeroBytes(raw)
-		zeroBytes(poolDigest)
-		zeroBytes(mbuf[:])
+		ZeroBytes(prngOut)
+		ZeroBytes(raw)
+		ZeroBytes(poolDigest)
+		ZeroBytes(mbuf[:])
 		return nil, 0, err
 	}
 
@@ -291,10 +292,10 @@ func (a *AIEntropyAlgorithm) GetEntropy(ctx time.Time) (data []byte, confidence 
 	conf := a.estimateConfidence(samples, ms, prngOut, spec)
 
 	// best-effort zeroing of temporaries
-	zeroBytes(prngOut)
-	zeroBytes(raw)
-	zeroBytes(poolDigest)
-	zeroBytes(mbuf[:])
+	ZeroBytes(prngOut)
+	ZeroBytes(raw)
+	ZeroBytes(poolDigest)
+	ZeroBytes(mbuf[:])
 	for i := range samples {
 		samples[i] = 0
 	}
@@ -384,14 +385,14 @@ func heuristicPrimeFragment() ([]byte, error) {
 // SelfTest performs a lightweight functional check: ensures outputs vary across calls
 // and confidence is reasonable. It is intended as an operational sanity check only.
 func (a *AIEntropyAlgorithm) SelfTest() error {
-	out1, conf1, err1 := a.GetEntropy(time.Now())
+	out1, conf1, err1 := a.GetEntropy(context.Background(), 32)
 	if err1 != nil {
 		return err1
 	}
 	time.Sleep(5 * time.Millisecond)
-	out2, conf2, err2 := a.GetEntropy(time.Now())
+	out2, conf2, err2 := a.GetEntropy(context.Background(), 32)
 	if err2 != nil {
-		zeroBytes(out1)
+		ZeroBytes(out1)
 		return err2
 	}
 	// identical outputs -> likely broken
@@ -404,17 +405,17 @@ func (a *AIEntropyAlgorithm) SelfTest() error {
 			}
 		}
 		if same {
-			zeroBytes(out1); zeroBytes(out2)
+			ZeroBytes(out1); ZeroBytes(out2)
 			return &SelfTestError{"ai_entropy: outputs identical across calls"}
 		}
 	}
 	// confidence check (very lenient)
 	if conf1 < 0.05 || conf2 < 0.05 {
 		// warn but do not fail hard; return a warning-like error
-		zeroBytes(out1); zeroBytes(out2)
+		ZeroBytes(out1); ZeroBytes(out2)
 		return &SelfTestError{"ai_entropy: low confidence observed"}
 	}
-	zeroBytes(out1); zeroBytes(out2)
+	ZeroBytes(out1); ZeroBytes(out2)
 	return nil
 }
 
@@ -423,8 +424,8 @@ type SelfTestError struct{ Msg string }
 
 func (e *SelfTestError) Error() string { return e.Msg }
 
-// zeroBytes: best-effort zeroing for slices
-func zeroBytes(b []byte) {
+// ZeroBytes: best-effort zeroing for slices
+func ZeroBytes(b []byte) {
 	if b == nil {
 		return
 	}

@@ -12,7 +12,7 @@ import (
 	"math/big"
 	"time"
 
-	"konrotaharai-netizen/internal/secstore"
+	"github.com/Aurionex/NebulaCore/internal/secstore"
 )
 
 const (
