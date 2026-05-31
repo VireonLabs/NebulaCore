@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"internal/geo"
+	"github.com/Aurionex/NebulaCore/internal/geo"
 )
 
 // ---------------- Types ----------------

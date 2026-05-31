@@ -5,7 +5,7 @@ import (
 	"log"
 	"os"
 
-	"konrotaharai-netizen/internal/secstore"
+	"github.com/Aurionex/NebulaCore/internal/secstore"
 )
 
 func main() {

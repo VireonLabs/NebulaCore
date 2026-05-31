@@ -1,6 +1,8 @@
 module github.com/Aurionex/NebulaCore
 
-go 1.20
+go 1.24.0
+
+toolchain go1.24.3
 
 require (
 	github.com/Knetic/govaluate v3.0.0+incompatible
@@ -92,6 +94,8 @@ require (
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.3.0 // indirect
+	github.com/vishvananda/netlink v1.1.1-0.20210330154013-f5de75959ad5 // indirect
+	github.com/vishvananda/netns v0.0.0-20210104183010-2eb08e3e575f // indirect
 	go.mongodb.org/mongo-driver v1.8.3 // indirect
 	golang.org/x/arch v0.20.0 // indirect
 	golang.org/x/mod v0.27.0 // indirect
@@ -108,42 +112,81 @@ require (
 
 // auto-generated replaces for local development
 replace github.com/Aurionex/NebulaCore/cmd/agent => ./cmd/agent
+
 replace github.com/Aurionex/NebulaCore/cmd/control-plane => ./cmd/control-plane
+
 replace github.com/Aurionex/NebulaCore/cmd/keystore-rotator => ./cmd/keystore-rotator
+
 replace github.com/Aurionex/NebulaCore/cmd/security-agent => ./cmd/security-agent
+
 replace github.com/Aurionex/NebulaCore/connectors => ./connectors
+
 replace github.com/Aurionex/NebulaCore/internal/agent => ./internal/agent
+
 replace github.com/Aurionex/NebulaCore/internal/aggregation => ./internal/aggregation
+
 replace github.com/Aurionex/NebulaCore/internal/ai => ./internal/ai
+
 replace github.com/Aurionex/NebulaCore/internal/api => ./internal/api
+
 replace github.com/Aurionex/NebulaCore/internal/billing => ./internal/billing
+
 replace github.com/Aurionex/NebulaCore/internal/bootstrap => ./internal/bootstrap
+
 replace github.com/Aurionex/NebulaCore/internal/communication => ./internal/communication
+
 replace github.com/Aurionex/NebulaCore/internal/crypto => ./internal/crypto
+
 replace github.com/Aurionex/NebulaCore/internal/cryptoengine => ./internal/cryptoengine
+
 replace github.com/Aurionex/NebulaCore/internal/ebpf => ./internal/ebpf
+
 replace github.com/Aurionex/NebulaCore/internal/execwatcher => ./internal/execwatcher
+
 replace github.com/Aurionex/NebulaCore/internal/geo => ./internal/geo
+
 replace github.com/Aurionex/NebulaCore/internal/identity => ./internal/identity
+
 replace github.com/Aurionex/NebulaCore/internal/logging => ./internal/logging
+
 replace github.com/Aurionex/NebulaCore/internal/microtasking => ./internal/microtasking
+
 replace github.com/Aurionex/NebulaCore/internal/monitoring => ./internal/monitoring
+
 replace github.com/Aurionex/NebulaCore/internal/policy => ./internal/policy
+
 replace github.com/Aurionex/NebulaCore/internal/qos => ./internal/qos
+
 replace github.com/Aurionex/NebulaCore/internal/quantum => ./internal/quantum
+
 replace github.com/Aurionex/NebulaCore/internal/scaling => ./internal/scaling
+
 replace github.com/Aurionex/NebulaCore/internal/scheduler => ./internal/scheduler
+
 replace github.com/Aurionex/NebulaCore/internal/secstore => ./internal/secstore
+
 replace github.com/Aurionex/NebulaCore/internal/security => ./internal/security
+
 replace github.com/Aurionex/NebulaCore/internal/selfhealing => ./internal/selfhealing
+
 replace github.com/Aurionex/NebulaCore/internal/server => ./internal/server
+
 replace github.com/Aurionex/NebulaCore/internal/services => ./internal/services
+
 replace github.com/Aurionex/NebulaCore/internal/storage => ./internal/storage
+
 replace github.com/Aurionex/NebulaCore/internal/store => ./internal/store
+
 replace github.com/Aurionex/NebulaCore/internal/superguard => ./internal/superguard
+
 replace github.com/Aurionex/NebulaCore/internal/telemetry => ./internal/telemetry
+
 replace github.com/Aurionex/NebulaCore/internal/tls => ./internal/tls
+
 replace github.com/Aurionex/NebulaCore/internal/training => ./internal/training
+
 replace github.com/Aurionex/NebulaCore/tools => ./tools
+
 replace github.com/Aurionex/NebulaCore/tools/plugin_runner => ./tools/plugin_runner
+
 replace github.com/Aurionex/NebulaCore/transit/pkg/transit => ./transit/pkg/transit

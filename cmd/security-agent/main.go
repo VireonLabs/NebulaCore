@@ -11,14 +11,14 @@ import (
 	"syscall"
 	"time"
 
-	"konrotaharai-netizen/internal/bootstrap"
-	"konrotaharai-netizen/internal/cryptoengine"
-	"konrotaharai-netizen/internal/ebpf"
-	"konrotaharai-netizen/internal/execwatcher"
-	"konrotaharai-netizen/internal/logging"
-	"konrotaharai-netizen/internal/monitoring"
-	"konrotaharai-netizen/internal/secstore"
-	"konrotaharai-netizen/internal/security"
+	"github.com/Aurionex/NebulaCore/internal/bootstrap"
+	"github.com/Aurionex/NebulaCore/internal/cryptoengine"
+	"github.com/Aurionex/NebulaCore/internal/ebpf"
+	"github.com/Aurionex/NebulaCore/internal/execwatcher"
+	"github.com/Aurionex/NebulaCore/internal/logging"
+	"github.com/Aurionex/NebulaCore/internal/monitoring"
+	"github.com/Aurionex/NebulaCore/internal/secstore"
+	"github.com/Aurionex/NebulaCore/internal/security"
 )
 
 func main() {

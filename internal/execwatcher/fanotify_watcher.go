@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"konrotaharai-netizen/internal/security"
+	"github.com/Aurionex/NebulaCore/internal/security"
 
 	"golang.org/x/sys/unix"
 )

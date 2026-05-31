@@ -1,11 +1,10 @@
-// internal/aggregation/resource_pool.go
+// internal/Aggregation/resource_pool.go
 // NebulaCore ResourcePool: Distributed Supercomputer Kernel for all resources.
-// Production-ready, AI-driven extension points, vector scoring (Pareto), composite reservations,
+// Production-ready, AI-driven extension points, Vector scoring (Pareto), composite reservations,
 // telemetry/forecast hooks, power-aware scheduling, health & deadline watchers, AutoDev (DSL).
 package aggregation
 
 import (
-	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -70,7 +69,7 @@ type NetworkInterface struct {
 	Bandwidth int64  // bps
 }
 
-// ResourceNode represents physical/virtual node and its free capacities.
+// ResourceNode represents physical/virtual Node and its free capacities.
 type ResourceNode struct {
 	ID         string
 	Provider   string
@@ -83,7 +82,7 @@ type ResourceNode struct {
 	Status     NODE_STATUS
 	TDP        int                // Power info (watts)
 	PoolTier   string             // hot/warm/cold
-	SLO        map[string]float64 // node-level SLO hints
+	SLO        map[string]float64 // Node-level SLO hints
 	LastSeen   time.Time
 	Meta       map[string]any
 	Allocated  map[ResourceType]float64 // total allocated (for telemetry)
@@ -98,7 +97,7 @@ type Reservation struct {
 	Amount       float64                           // legacy amount
 	Priority     int                               // higher => more priority
 	Soft         bool                              // soft reservation can be preempted
-	Affinity     []string                          // node IDs or labels or key=value
+	Affinity     []string                          // Node IDs or labels or key=value
 	AntiAffinity []string
 	SLO          map[string]float64
 	Start        time.Time
@@ -106,14 +105,14 @@ type Reservation struct {
 	Policy       string // name of policy module
 	CreatedAt    time.Time
 	Owner        string // logical owner (project/user)
-	Weights      map[string]float64 // optional weights for multi-dim vector scoring
+	Weights      map[string]float64 // optional Weights for Multi-Dim Vector scoring
 	_enqueuedAt  time.Time          // internal
 }
 
-// PoolPolicy: returns (nodeID, scoreVector, error). scoreVector dims are policy-specific e.g. {"util":0.7,"energy":0.2}
+// PoolPolicy: returns (NodeID, scoreVector, error). scoreVector Dims are policy-specific e.g. {"util":0.7,"energy":0.2}
 type PoolPolicy interface {
 	Name() string
-	Allocate(pool *ResourcePool, req Reservation) (string, map[string]float64, error) // returns nodeID + vector scores
+	Allocate(pool *ResourcePool, req Reservation) (string, map[string]float64, error) // returns NodeID + Vector Scores
 	ExplainDecision(req Reservation) string
 }
 
@@ -149,20 +148,20 @@ func (e *ResourceError) Error() string { return e.Msg }
 type ForecastHook func(resource ResourceType, region string, horizon time.Duration) float64
 type AutoscalerHook func(pool *ResourcePool) error
 type AllocatorHook func(pool *ResourcePool)
-type PolicyVerifier func(policyBytes []byte) error // must verify signature/safety
+type PolicyVerifier func(policyBytes []byte) error // Must verify signature/safety
 type PolicyLoader func(policyBytes []byte) (PoolPolicy, error)
 
 type ResourcePool struct {
-	mu                  sync.RWMutex
-	nodes               map[string]*ResourceNode
-	reserves            map[string]Reservation
-	policies            map[string]PoolPolicy
+	Mu                  sync.RWMutex
+	Nodes               map[string]*ResourceNode
+	Reserves            map[string]Reservation
+	Policies            map[string]PoolPolicy
 	KPIs                map[string]float64
-	trace               []TraceEntry
+	Trace               []TraceEntry
 	AutoDev             func(name string, wasmOrDSL []byte) error // orchestrator-provided upload handler
-	onChange            []func()
-	rebalanceHook       func(pool *ResourcePool)
-	forecastHook        ForecastHook
+	OnChange            []func()
+	RebalanceHook       func(pool *ResourcePool)
+	ForecastHook        ForecastHook
 	autoscalerHook      AutoscalerHook
 	allocatorHook       AllocatorHook
 	policyVerifier      PolicyVerifier
@@ -171,7 +170,7 @@ type ResourcePool struct {
 	stopHealthCh        chan struct{}
 	deadlineInterval    time.Duration
 	stopDeadlineCh      chan struct{}
-	traceMax            int
+	TraceMax            int
 	pendingQueue        []Reservation
 	allocatorInterval   time.Duration
 	allocatorStopCh     chan struct{}
@@ -180,28 +179,28 @@ type ResourcePool struct {
 	rand                *rand.Rand
 }
 
-// NewResourcePool initialises pool with defaults and built-in policies.
+// NewResourcePool initialises pool with defaults and built-in Policies.
 func NewResourcePool() *ResourcePool {
 	src := rand.NewSource(time.Now().UnixNano())
 	r := rand.New(src)
 	rp := &ResourcePool{
-		nodes:               make(map[string]*ResourceNode),
-		reserves:            make(map[string]Reservation),
-		policies:            make(map[string]PoolPolicy),
+		Nodes:               make(map[string]*ResourceNode),
+		Reserves:            make(map[string]Reservation),
+		Policies:            make(map[string]PoolPolicy),
 		KPIs:                make(map[string]float64),
-		trace:               make([]TraceEntry, 0, 256),
-		onChange:            make([]func(), 0),
+		Trace:               make([]TraceEntry, 0, 256),
+		OnChange:            make([]func(), 0),
 		healthCheckInterval: 15 * time.Second,
 		healthTimeout:       defaultHealthDur,
 		deadlineInterval:    defaultDeadlineChk,
-		traceMax:            defaultTraceMax,
+		TraceMax:            defaultTraceMax,
 		pendingQueue:        make([]Reservation, 0),
 		allocatorInterval:   defaultAllocatorTick,
 		autoscalerInterval:  defaultAutoscaleTick,
 		rand:                r,
 	}
-	rp.policies["default-fairshare"] = &DefaultFairSharePolicy{}
-	rp.policies["cost-aware"] = &CostAwarePolicy{}
+	rp.Policies["default-fairshare"] = &DefaultFairSharePolicy{}
+	rp.Policies["cost-aware"] = &CostAwarePolicy{}
 	rp.KPIs["utilization_cpu"] = 0.0
 	rp.KPIs["utilization_gpu"] = 0.0
 	rp.KPIs["failed_allocs"] = 0.0
@@ -214,7 +213,7 @@ func NewResourcePool() *ResourcePool {
 // -------------------- Node Management --------------------
 
 func (rp *ResourcePool) AddNode(n *ResourceNode) {
-	rp.mu.Lock()
+	rp.Mu.Lock()
 	if n.Labels == nil {
 		n.Labels = map[string]string{}
 	}
@@ -231,15 +230,15 @@ func (rp *ResourcePool) AddNode(n *ResourceNode) {
 	if n.Status == "" {
 		n.Status = NODE_ONLINE
 	}
-	rp.nodes[n.ID] = n
-	rp.traceAppend(TraceInfo, "AddNode", "node-added", map[string]any{"node": n.ID}, rp.snapshotForExplain(n.ID))
-	rp.mu.Unlock()
+	rp.Nodes[n.ID] = n
+	rp.TraceAppend(TraceInfo, "AddNode", "Node-added", map[string]any{"Node": n.ID}, rp.snapshotForExplain(n.ID))
+	rp.Mu.Unlock()
 	rp.notify()
 }
 
-func (rp *ResourcePool) AddNodes(nodes []*ResourceNode) {
-	rp.mu.Lock()
-	for _, n := range nodes {
+func (rp *ResourcePool) AddNodes(Nodes []*ResourceNode) {
+	rp.Mu.Lock()
+	for _, n := range Nodes {
 		if n.Labels == nil {
 			n.Labels = map[string]string{}
 		}
@@ -256,55 +255,55 @@ func (rp *ResourcePool) AddNodes(nodes []*ResourceNode) {
 		if n.Status == "" {
 			n.Status = NODE_ONLINE
 		}
-		rp.nodes[n.ID] = n
-		rp.traceAppend(TraceInfo, "AddNodes", "node-added", map[string]any{"node": n.ID}, rp.snapshotForExplain(n.ID))
+		rp.Nodes[n.ID] = n
+		rp.TraceAppend(TraceInfo, "AddNodes", "Node-added", map[string]any{"Node": n.ID}, rp.snapshotForExplain(n.ID))
 	}
-	rp.mu.Unlock()
+	rp.Mu.Unlock()
 	rp.notify()
 }
 
 func (rp *ResourcePool) RemoveNode(id string) {
-	rp.mu.Lock()
-	delete(rp.nodes, id)
-	rp.traceAppend(TraceWarn, "RemoveNode", "node-removed", map[string]any{"node": id}, nil)
-	rp.mu.Unlock()
+	rp.Mu.Lock()
+	delete(rp.Nodes, id)
+	rp.TraceAppend(TraceWarn, "RemoveNode", "Node-removed", map[string]any{"Node": id}, nil)
+	rp.Mu.Unlock()
 	rp.notify()
 }
 
-func (rp *ResourcePool) UpdateNodeStatus(nodeID string, status NODE_STATUS) error {
-	rp.mu.Lock()
-	defer rp.mu.Unlock()
-	n, ok := rp.nodes[nodeID]
+func (rp *ResourcePool) UpdateNodeStatus(NodeID string, status NODE_STATUS) error {
+	rp.Mu.Lock()
+	defer rp.Mu.Unlock()
+	n, ok := rp.Nodes[NodeID]
 	if !ok {
-		return fmt.Errorf("node %s not found", nodeID)
+		return fmt.Errorf("Node %s not found", NodeID)
 	}
 	n.Status = status
 	n.LastSeen = time.Now()
-	rp.traceAppend(TraceInfo, "UpdateNodeStatus", string(status), map[string]any{"node": nodeID}, rp.snapshotForExplain(nodeID))
+	rp.TraceAppend(TraceInfo, "UpdateNodeStatus", string(status), map[string]any{"Node": NodeID}, rp.snapshotForExplain(NodeID))
 	rp.notify()
 	return nil
 }
 
-func (rp *ResourcePool) UpdateNodeResources(nodeID string, res map[ResourceType]float64) error {
-	rp.mu.Lock()
-	defer rp.mu.Unlock()
-	n, ok := rp.nodes[nodeID]
+func (rp *ResourcePool) UpdateNodeResources(NodeID string, res map[ResourceType]float64) error {
+	rp.Mu.Lock()
+	defer rp.Mu.Unlock()
+	n, ok := rp.Nodes[NodeID]
 	if !ok {
-		return fmt.Errorf("node %s not found", nodeID)
+		return fmt.Errorf("Node %s not found", NodeID)
 	}
 	n.Resources = res
 	n.LastSeen = time.Now()
-	rp.traceAppend(TraceInfo, "UpdateNodeResources", "updated-resources", map[string]any{"node": nodeID}, rp.snapshotForExplain(nodeID))
+	rp.TraceAppend(TraceInfo, "UpdateNodeResources", "updated-resources", map[string]any{"Node": NodeID}, rp.snapshotForExplain(NodeID))
 	rp.notify()
 	return nil
 }
 
-func (rp *ResourcePool) UpdateNodeMeta(nodeID string, labels map[string]string, meta map[string]any) error {
-	rp.mu.Lock()
-	defer rp.mu.Unlock()
-	n, ok := rp.nodes[nodeID]
+func (rp *ResourcePool) UpdateNodeMeta(NodeID string, labels map[string]string, meta map[string]any) error {
+	rp.Mu.Lock()
+	defer rp.Mu.Unlock()
+	n, ok := rp.Nodes[NodeID]
 	if !ok {
-		return fmt.Errorf("node %s not found", nodeID)
+		return fmt.Errorf("Node %s not found", NodeID)
 	}
 	for k, v := range labels {
 		n.Labels[k] = v
@@ -313,16 +312,16 @@ func (rp *ResourcePool) UpdateNodeMeta(nodeID string, labels map[string]string, 
 		n.Meta[k] = v
 	}
 	n.LastSeen = time.Now()
-	rp.traceAppend(TraceInfo, "UpdateNodeMeta", "labels-meta-updated", map[string]any{"node": nodeID}, rp.snapshotForExplain(nodeID))
+	rp.TraceAppend(TraceInfo, "UpdateNodeMeta", "labels-meta-updated", map[string]any{"Node": NodeID}, rp.snapshotForExplain(NodeID))
 	rp.notify()
 	return nil
 }
 
-func (rp *ResourcePool) GetNodeInfo(nodeID string) *ResourceNode {
-	rp.mu.RLock()
-	n, ok := rp.nodes[nodeID]
+func (rp *ResourcePool) GetNodeInfo(NodeID string) *ResourceNode {
+	rp.Mu.RLock()
+	n, ok := rp.Nodes[NodeID]
 	if !ok {
-		rp.mu.RUnlock()
+		rp.Mu.RUnlock()
 		return nil
 	}
 	copyNode := *n
@@ -332,7 +331,7 @@ func (rp *ResourcePool) GetNodeInfo(nodeID string) *ResourceNode {
 	copyNode.NUMATop = append([]NUMANode(nil), n.NUMATop...)
 	copyNode.GPUTop = append([]GPUPartition(nil), n.GPUTop...)
 	copyNode.NICs = append([]NetworkInterface(nil), n.NICs...)
-	rp.mu.RUnlock()
+	rp.Mu.RUnlock()
 	return &copyNode
 }
 
@@ -348,21 +347,21 @@ func ensureUniqueReservationIDUnlocked(rp *ResourcePool, r *Reservation) {
 		r.ID = rp.genReservationID()
 	}
 	// if exists, append numeric suffix until unique
-	if _, exists := rp.reserves[r.ID]; exists {
+	if _, exists := rp.Reserves[r.ID]; exists {
 		base := r.ID
 		for i := 1; ; i++ {
 			r.ID = fmt.Sprintf("%s-%d", base, i)
-			if _, ok := rp.reserves[r.ID]; !ok {
+			if _, ok := rp.Reserves[r.ID]; !ok {
 				break
 			}
 		}
 	}
 }
 
-// -------------------- Reservation / Allocation (composite + vector scoring) --------------------
+// -------------------- Reservation / Allocation (composite + Vector scoring) --------------------
 
 // Allocate attempts allocation using a policy, supports composite requirements and forecasting avoidance.
-// Returns nodeID, scoreVector, error.
+// Returns NodeID, scoreVector, error.
 func (rp *ResourcePool) Allocate(req Reservation) (string, map[string]float64, error) {
 	start := time.Now()
 
@@ -370,7 +369,7 @@ func (rp *ResourcePool) Allocate(req Reservation) (string, map[string]float64, e
 		req.CreatedAt = time.Now()
 	}
 
-	// normalize composite
+	// Normalize composite
 	reqReqs := map[ResourceType]float64{}
 	if len(req.Requirements) > 0 {
 		for k, v := range req.Requirements {
@@ -381,7 +380,7 @@ func (rp *ResourcePool) Allocate(req Reservation) (string, map[string]float64, e
 	}
 
 	// admission quick check under lock
-	rp.mu.Lock()
+	rp.Mu.Lock()
 	ensureUniqueReservationIDUnlocked(rp, &req)
 
 	// pick policy safely
@@ -389,26 +388,26 @@ func (rp *ResourcePool) Allocate(req Reservation) (string, map[string]float64, e
 	if policyName == "" {
 		policyName = "default-fairshare"
 	}
-	policy := rp.policies[policyName]
+	policy := rp.Policies[policyName]
 	if policy == nil {
 		// no policy available -> fail or queue if soft
-		rp.traceAppend(TraceWarn, "Allocate", "policy-missing", map[string]any{"req": req.ID, "policy": policyName}, nil)
+		rp.TraceAppend(TraceWarn, "Allocate", "policy-missing", map[string]any{"req": req.ID, "policy": policyName}, nil)
 		if req.Soft {
 			req._enqueuedAt = time.Now()
 			rp.pendingQueue = append(rp.pendingQueue, req)
-			rp.traceAppend(TraceInfo, "Allocate", "queued-soft-missing-policy", map[string]any{"req": req.ID}, nil)
-			rp.mu.Unlock()
+			rp.TraceAppend(TraceInfo, "Allocate", "queued-soft-missing-policy", map[string]any{"req": req.ID}, nil)
+			rp.Mu.Unlock()
 			return "", nil, ErrQueued
 		}
 		rp.KPIs["failed_allocs"] = rp.KPIs["failed_allocs"] + 1
-		rp.mu.Unlock()
+		rp.Mu.Unlock()
 		rp.updateAvgAllocLatency(time.Since(start))
 		return "", nil, fmt.Errorf("policy %s not found", policyName)
 	}
 
-	// quick feasibility: is any node capable on static view?
+	// quick feasibility: is any Node capable on static view?
 	canSatisfy := false
-	for _, n := range rp.nodes {
+	for _, n := range rp.Nodes {
 		if n.Status != NODE_ONLINE {
 			continue
 		}
@@ -431,57 +430,57 @@ func (rp *ResourcePool) Allocate(req Reservation) (string, map[string]float64, e
 		if req.Soft {
 			req._enqueuedAt = time.Now()
 			rp.pendingQueue = append(rp.pendingQueue, req)
-			rp.traceAppend(TraceInfo, "Allocate", "queued-soft-no-capacity", map[string]any{"req": req.ID}, nil)
-			rp.mu.Unlock()
+			rp.TraceAppend(TraceInfo, "Allocate", "queued-soft-no-capacity", map[string]any{"req": req.ID}, nil)
+			rp.Mu.Unlock()
 			return "", nil, ErrQueued
 		}
 		rp.KPIs["failed_allocs"] = rp.KPIs["failed_allocs"] + 1
-		rp.traceAppend(TraceWarn, "Allocate", "no-capacity", map[string]any{"req": req.ID}, nil)
-		rp.mu.Unlock()
+		rp.TraceAppend(TraceWarn, "Allocate", "no-capacity", map[string]any{"req": req.ID}, nil)
+		rp.Mu.Unlock()
 		rp.updateAvgAllocLatency(time.Since(start))
 		return "", nil, ErrNoResource
 	}
-	// copy policy to local var and release lock (policies should be safe to call concurrently)
+	// copy policy to local var and release lock (Policies should be safe to call concurrently)
 	localPolicy := policy
-	rp.mu.Unlock()
+	rp.Mu.Unlock()
 
-	nodeID, vec, err := localPolicy.Allocate(rp, req)
+	NodeID, Vec, err := localPolicy.Allocate(rp, req)
 	if err != nil {
-		rp.mu.Lock()
-		defer rp.mu.Unlock()
+		rp.Mu.Lock()
+		defer rp.Mu.Unlock()
 		rp.KPIs["failed_allocs"] = rp.KPIs["failed_allocs"] + 1
-		rp.traceAppend(TraceWarn, "Allocate", "policy-failed", map[string]any{"req": req.ID, "err": err.Error(), "policy": localPolicy.Name()}, nil)
+		rp.TraceAppend(TraceWarn, "Allocate", "policy-failed", map[string]any{"req": req.ID, "err": err.Error(), "policy": localPolicy.Name()}, nil)
 		rp.updateAvgAllocLatency(time.Since(start))
 		if req.Soft {
 			req._enqueuedAt = time.Now()
 			rp.pendingQueue = append(rp.pendingQueue, req)
-			rp.traceAppend(TraceInfo, "Allocate", "queued-after-policy-fail", map[string]any{"req": req.ID}, nil)
+			rp.TraceAppend(TraceInfo, "Allocate", "queued-after-policy-fail", map[string]any{"req": req.ID}, nil)
 			return "", nil, ErrQueued
 		}
 		return "", nil, err
 	}
 
 	// booking atomic under lock
-	rp.mu.Lock()
-	defer rp.mu.Unlock()
-	n, ok := rp.nodes[nodeID]
+	rp.Mu.Lock()
+	defer rp.Mu.Unlock()
+	n, ok := rp.Nodes[NodeID]
 	if !ok {
 		rp.KPIs["failed_allocs"] = rp.KPIs["failed_allocs"] + 1
-		rp.traceAppend(TraceError, "Allocate", "node-missing-after-policy", map[string]any{"req": req.ID, "node": nodeID}, nil)
+		rp.TraceAppend(TraceError, "Allocate", "Node-missing-after-policy", map[string]any{"req": req.ID, "Node": NodeID}, nil)
 		rp.updateAvgAllocLatency(time.Since(start))
-		return "", nil, fmt.Errorf("node %s disappeared during allocate", nodeID)
+		return "", nil, fmt.Errorf("Node %s disappeared during allocate", NodeID)
 	}
 
 	// forecast safeguard with timeout
-	if rp.forecastHook != nil {
+	if rp.ForecastHook != nil {
 		for rt := range reqReqs {
 			if rp.callForecastWithTimeout(rt, n.Region, 30*time.Second) >= 0.95 {
-				rp.traceAppend(TraceWarn, "Allocate", "forecast-block", map[string]any{"node": nodeID, "resource": rt}, rp.snapshotForExplain(nodeID))
+				rp.TraceAppend(TraceWarn, "Allocate", "forecast-block", map[string]any{"Node": NodeID, "resource": rt}, rp.snapshotForExplain(NodeID))
 				rp.KPIs["failed_allocs"] = rp.KPIs["failed_allocs"] + 1
 				if req.Soft {
 					req._enqueuedAt = time.Now()
 					rp.pendingQueue = append(rp.pendingQueue, req)
-					rp.traceAppend(TraceInfo, "Allocate", "queued-due-to-forecast", map[string]any{"req": req.ID}, nil)
+					rp.TraceAppend(TraceInfo, "Allocate", "queued-due-to-forecast", map[string]any{"req": req.ID}, nil)
 					rp.updateAvgAllocLatency(time.Since(start))
 					return "", nil, ErrQueued
 				}
@@ -496,7 +495,7 @@ func (rp *ResourcePool) Allocate(req Reservation) (string, map[string]float64, e
 		avail := n.Resources[rt]
 		if avail < amt {
 			rp.KPIs["failed_allocs"] = rp.KPIs["failed_allocs"] + 1
-			rp.traceAppend(TraceWarn, "Allocate", "insufficient-after-decision", map[string]any{"req": req.ID, "node": nodeID, "rtype": rt}, rp.snapshotForExplain(nodeID))
+			rp.TraceAppend(TraceWarn, "Allocate", "insufficient-after-decision", map[string]any{"req": req.ID, "Node": NodeID, "rtype": rt}, rp.snapshotForExplain(NodeID))
 			rp.updateAvgAllocLatency(time.Since(start))
 			return "", nil, ErrNoResource
 		}
@@ -508,21 +507,21 @@ func (rp *ResourcePool) Allocate(req Reservation) (string, map[string]float64, e
 		}
 		n.Allocated[rt] = n.Allocated[rt] + amt
 	}
-	rp.reserves[req.ID] = req
-	rp.traceAppend(TraceInfo, "Allocate", "ok", map[string]any{"req": req.ID, "node": nodeID, "reqs": reqReqs, "policy": localPolicy.Name()}, rp.snapshotForExplain(nodeID))
+	rp.Reserves[req.ID] = req
+	rp.TraceAppend(TraceInfo, "Allocate", "ok", map[string]any{"req": req.ID, "Node": NodeID, "reqs": reqReqs, "policy": localPolicy.Name()}, rp.snapshotForExplain(NodeID))
 	rp.updateKPIsLocked()
 	rp.updateAvgAllocLatency(time.Since(start))
 	rp.notify()
-	return nodeID, vec, nil
+	return NodeID, Vec, nil
 }
 
 // Free releases composite reservation and restores resources.
 func (rp *ResourcePool) Free(resID string) error {
-	rp.mu.Lock()
-	defer rp.mu.Unlock()
-	req, ok := rp.reserves[resID]
+	rp.Mu.Lock()
+	defer rp.Mu.Unlock()
+	req, ok := rp.Reserves[resID]
 	if !ok {
-		rp.traceAppend(TraceWarn, "Free", "reservation-not-found", map[string]any{"res": resID}, nil)
+		rp.TraceAppend(TraceWarn, "Free", "reservation-not-found", map[string]any{"res": resID}, nil)
 		return fmt.Errorf("reservation %s not found", resID)
 	}
 	reqReqs := map[ResourceType]float64{}
@@ -533,7 +532,7 @@ func (rp *ResourcePool) Free(resID string) error {
 	} else if req.RType != "" && req.Amount > 0 {
 		reqReqs[req.RType] = req.Amount
 	}
-	n, ok := rp.nodes[req.NodeID]
+	n, ok := rp.Nodes[req.NodeID]
 	if ok {
 		for rt, amt := range reqReqs {
 			n.Resources[rt] = n.Resources[rt] + amt
@@ -543,17 +542,17 @@ func (rp *ResourcePool) Free(resID string) error {
 			n.Allocated[rt] = math.Max(0, n.Allocated[rt]-amt)
 		}
 	}
-	delete(rp.reserves, resID)
-	rp.traceAppend(TraceInfo, "Free", "released", map[string]any{"res": resID, "node": req.NodeID}, rp.snapshotForExplain(req.NodeID))
+	delete(rp.Reserves, resID)
+	rp.TraceAppend(TraceInfo, "Free", "released", map[string]any{"res": resID, "Node": req.NodeID}, rp.snapshotForExplain(req.NodeID))
 	rp.updateKPIsLocked()
 	rp.notify()
 	return nil
 }
 
 func (rp *ResourcePool) FreeMany(resIDs []string) {
-	rp.mu.Lock()
+	rp.Mu.Lock()
 	for _, id := range resIDs {
-		req, ok := rp.reserves[id]
+		req, ok := rp.Reserves[id]
 		if !ok {
 			continue
 		}
@@ -565,7 +564,7 @@ func (rp *ResourcePool) FreeMany(resIDs []string) {
 		} else if req.RType != "" && req.Amount > 0 {
 			reqReqs[req.RType] = req.Amount
 		}
-		if n, ok := rp.nodes[req.NodeID]; ok {
+		if n, ok := rp.Nodes[req.NodeID]; ok {
 			for rt, amt := range reqReqs {
 				n.Resources[rt] = n.Resources[rt] + amt
 				if n.Allocated == nil {
@@ -574,58 +573,58 @@ func (rp *ResourcePool) FreeMany(resIDs []string) {
 				n.Allocated[rt] = math.Max(0, n.Allocated[rt]-amt)
 			}
 		}
-		delete(rp.reserves, id)
-		rp.traceAppend(TraceInfo, "FreeMany", "released", map[string]any{"res": id, "node": req.NodeID}, rp.snapshotForExplain(req.NodeID))
+		delete(rp.Reserves, id)
+		rp.TraceAppend(TraceInfo, "FreeMany", "released", map[string]any{"res": id, "Node": req.NodeID}, rp.snapshotForExplain(req.NodeID))
 	}
-	rp.mu.Unlock()
+	rp.Mu.Unlock()
 	rp.updateKPIsLocked()
 	rp.notify()
 }
 
 func (rp *ResourcePool) ListReservations() []Reservation {
-	rp.mu.RLock()
-	defer rp.mu.RUnlock()
-	out := make([]Reservation, 0, len(rp.reserves))
-	for _, r := range rp.reserves {
+	rp.Mu.RLock()
+	defer rp.Mu.RUnlock()
+	out := make([]Reservation, 0, len(rp.Reserves))
+	for _, r := range rp.Reserves {
 		out = append(out, r)
 	}
 	return out
 }
 
-// -------------------- Policies Management / DSL / Multi-dim scoring --------------------
+// -------------------- Policies Management / DSL / Multi-Dim scoring --------------------
 
 func (rp *ResourcePool) InjectPolicy(name string, p PoolPolicy) {
-	rp.mu.Lock()
-	rp.policies[name] = p
-	rp.traceAppend(TraceInfo, "InjectPolicy", "policy-injected", map[string]any{"policy": name}, nil)
-	rp.mu.Unlock()
+	rp.Mu.Lock()
+	rp.Policies[name] = p
+	rp.TraceAppend(TraceInfo, "InjectPolicy", "policy-injected", map[string]any{"policy": name}, nil)
+	rp.Mu.Unlock()
 	rp.notify()
 }
 
 func (rp *ResourcePool) RemovePolicy(name string) {
-	rp.mu.Lock()
-	delete(rp.policies, name)
-	rp.traceAppend(TraceWarn, "RemovePolicy", "policy-removed", map[string]any{"policy": name}, nil)
-	rp.mu.Unlock()
+	rp.Mu.Lock()
+	delete(rp.Policies, name)
+	rp.TraceAppend(TraceWarn, "RemovePolicy", "policy-removed", map[string]any{"policy": name}, nil)
+	rp.Mu.Unlock()
 	rp.notify()
 }
 
 func (rp *ResourcePool) SetAutoDev(f func(name string, wasmOrDSL []byte) error) {
-	rp.mu.Lock()
+	rp.Mu.Lock()
 	rp.AutoDev = f
-	rp.traceAppend(TraceInfo, "SetAutoDev", "autodev-hook-set", nil, nil)
-	rp.mu.Unlock()
+	rp.TraceAppend(TraceInfo, "SetAutoDev", "autodev-hook-set", nil, nil)
+	rp.Mu.Unlock()
 	rp.notify()
 }
 
 func (rp *ResourcePool) SetPolicyVerifier(v PolicyVerifier) {
-	rp.mu.Lock()
+	rp.Mu.Lock()
 	rp.policyVerifier = v
-	rp.mu.Unlock()
-	rp.traceAppend(TraceInfo, "SetPolicyVerifier", "verifier-set", nil, nil)
+	rp.Mu.Unlock()
+	rp.TraceAppend(TraceInfo, "SetPolicyVerifier", "verifier-set", nil, nil)
 }
 
-// RegisterPolicyFromDSL (single-dim)
+// RegisterPolicyFromDSL (single-Dim)
 func (rp *ResourcePool) RegisterPolicyFromDSL(name string, script string) error {
 	expr, err := govaluate.NewEvaluableExpression(script)
 	if err != nil {
@@ -634,7 +633,7 @@ func (rp *ResourcePool) RegisterPolicyFromDSL(name string, script string) error 
 	p := &ExprPolicy{
 		name:    name,
 		exprs:   map[string]*govaluate.EvaluableExpression{"score": expr},
-		dims:    []string{"score"},
+		Dims:    []string{"score"},
 		rawDSL:  script,
 		created: time.Now(),
 	}
@@ -642,37 +641,37 @@ func (rp *ResourcePool) RegisterPolicyFromDSL(name string, script string) error 
 	return nil
 }
 
-// RegisterMultiDimPolicyFromDSL registers a policy with named dimensions expressions.
-func (rp *ResourcePool) RegisterMultiDimPolicyFromDSL(name string, dimExprs map[string]string) error {
+// RegisterMultiDimPolicyFromDSL registers a policy with named Dimensions expressions.
+func (rp *ResourcePool) RegisterMultiDimPolicyFromDSL(name string, DimExprs map[string]string) error {
 	exprs := map[string]*govaluate.EvaluableExpression{}
-	dims := []string{}
-	for k, s := range dimExprs {
+	Dims := []string{}
+	for k, s := range DimExprs {
 		e, err := govaluate.NewEvaluableExpression(s)
 		if err != nil {
-			return fmt.Errorf("dsl compile error dim=%s: %w", k, err)
+			return fmt.Errorf("dsl compile error Dim=%s: %w", k, err)
 		}
 		exprs[k] = e
-		dims = append(dims, k)
+		Dims = append(Dims, k)
 	}
 	p := &ExprPolicy{
 		name:    name,
 		exprs:   exprs,
-		dims:    dims,
-		rawDSL:  "<multi-dim>",
+		Dims:    Dims,
+		rawDSL:  "<Multi-Dim>",
 		created: time.Now(),
 	}
 	rp.InjectPolicy(name, p)
 	return nil
 }
 
-// RegisterPolicyFromLoader requires a verifier to be set before accepting binary policies.
+// RegisterPolicyFromLoader requires a verifier to be set before accepting binary Policies.
 func (rp *ResourcePool) RegisterPolicyFromLoader(name string, policyBytes []byte, loader PolicyLoader) error {
 	if loader == nil {
 		return fmt.Errorf("loader is nil")
 	}
-	rp.mu.RLock()
+	rp.Mu.RLock()
 	verifier := rp.policyVerifier
-	rp.mu.RUnlock()
+	rp.Mu.RUnlock()
 	if verifier == nil {
 		return fmt.Errorf("policy verifier not configured: refusing to load binary policy")
 	}
@@ -687,22 +686,22 @@ func (rp *ResourcePool) RegisterPolicyFromLoader(name string, policyBytes []byte
 	return nil
 }
 
-// ExprPolicy uses govaluate expressions to compute one or more dimensions per candidate.
+// ExprPolicy uses govaluate expressions to compute one or more Dimensions per candidate.
 type ExprPolicy struct {
 	name    string
-	exprs   map[string]*govaluate.EvaluableExpression // dim -> expr
-	dims    []string
+	exprs   map[string]*govaluate.EvaluableExpression // Dim -> expr
+	Dims    []string
 	rawDSL  string
 	created time.Time
 }
 
 func (p *ExprPolicy) Name() string { return p.name }
 
-// Allocate will compute dims for each candidate and choose by Pareto front then tiebreak by weighted sum.
+// Allocate will compute Dims for each candidate and choose by Pareto front then tiebreak by weighted sum.
 func (p *ExprPolicy) Allocate(pool *ResourcePool, req Reservation) (string, map[string]float64, error) {
-	pool.mu.RLock()
-	cands := make([]*ResourceNode, 0, len(pool.nodes))
-	for _, n := range pool.nodes {
+	pool.Mu.RLock()
+	Cands := make([]*ResourceNode, 0, len(pool.Nodes))
+	for _, n := range pool.Nodes {
 		if n.Status != NODE_ONLINE {
 			continue
 		}
@@ -727,51 +726,46 @@ func (p *ExprPolicy) Allocate(pool *ResourcePool, req Reservation) (string, map[
 		if !okcap {
 			continue
 		}
-		cands = append(cands, n)
+		Cands = append(Cands, n)
 	}
-	pool.mu.RUnlock()
+	pool.Mu.RUnlock()
 
-	if len(cands) == 0 {
+	if len(Cands) == 0 {
 		return "", nil, ErrNoResource
 	}
 
-	type candScore struct {
-		node  *ResourceNode
-		vec   map[string]float64
-		order int
-	}
-	scores := make([]candScore, 0, len(cands))
-	for i, n := range cands {
-		params := make(map[string]any)
-		params["req_amount"] = req.Amount
-		params["req_priority"] = req.Priority
-		params["node_tdp"] = n.TDP
-		params["node_pooltier"] = n.PoolTier
-		params["node_region"] = n.Region
-		params["node_cpu"] = n.Resources[ResourceCPU]
-		params["node_gpu"] = n.Resources[ResourceGPU]
-		params["node_ram"] = n.Resources[ResourceRAM]
+	Scores := make([]candScore, 0, len(Cands))
+	for i, n := range Cands {
+		Params := make(map[string]any)
+		Params["req_amount"] = req.Amount
+		Params["req_priority"] = req.Priority
+		Params["Node_tdp"] = n.TDP
+		Params["Node_pooltier"] = n.PoolTier
+		Params["Node_region"] = n.Region
+		Params["Node_cpu"] = n.Resources[ResourceCPU]
+		Params["Node_gpu"] = n.Resources[ResourceGPU]
+		Params["Node_ram"] = n.Resources[ResourceRAM]
 		if n.Allocated != nil {
-			params["node_alloc_cpu"] = n.Allocated[ResourceCPU]
-			params["node_alloc_gpu"] = n.Allocated[ResourceGPU]
+			Params["Node_alloc_cpu"] = n.Allocated[ResourceCPU]
+			Params["Node_alloc_gpu"] = n.Allocated[ResourceGPU]
 		} else {
-			params["node_alloc_cpu"] = 0.0
-			params["node_alloc_gpu"] = 0.0
+			Params["Node_alloc_cpu"] = 0.0
+			Params["Node_alloc_gpu"] = 0.0
 		}
 		for k, v := range n.Meta {
 			kc := "meta_" + strings.ReplaceAll(k, "-", "_")
-			params[kc] = v
+			Params[kc] = v
 		}
-		vec := map[string]float64{}
-		skip := false
-		for _, dim := range p.dims {
-			expr := p.exprs[dim]
+		Vec := map[string]float64{}
+		Skip := false
+		for _, Dim := range p.Dims {
+			expr := p.exprs[Dim]
 			if expr == nil {
 				continue
 			}
-			res, err := expr.Evaluate(params)
+			res, err := expr.Evaluate(Params)
 			if err != nil {
-				skip = true
+				Skip = true
 				break
 			}
 			var f float64
@@ -785,80 +779,82 @@ func (p *ExprPolicy) Allocate(pool *ResourcePool, req Reservation) (string, map[
 			case int64:
 				f = float64(t)
 			default:
-				skip = true
+				Skip = true
 				break
 			}
-			vec[dim] = f
+			Vec[Dim] = f
 		}
-		if skip {
+		if Skip {
 			continue
 		}
-		scores = append(scores, candScore{node: n, vec: vec, order: i})
+		Scores = append(Scores, candScore{Node: n, Vec: Vec, Order: i})
 	}
-	if len(scores) == 0 {
+	if len(Scores) == 0 {
 		return "", nil, ErrNoResource
 	}
 
-	indices := paretoFrontIndices(scores)
-	if len(indices) == 1 {
-		chosen := scores[indices[0]]
-		return chosen.node.ID, chosen.vec, nil
+	Indices := paretoFrontIndices(Scores)
+	if len(Indices) == 1 {
+		Chosen := Scores[Indices[0]]
+		return Chosen.Node.ID, Chosen.Vec, nil
 	}
-	weights := map[string]float64{}
+	Weights := map[string]float64{}
 	if req.Weights != nil && len(req.Weights) > 0 {
 		for k, v := range req.Weights {
-			weights[k] = v
+			Weights[k] = v
 		}
 	} else {
-		for _, d := range p.dims {
-			weights[d] = 1.0
+		for _, d := range p.Dims {
+			Weights[d] = 1.0
 		}
 	}
-	bestScore := math.Inf(-1)
-	bestIdx := indices[0]
-	for _, idx := range indices {
-		cs := scores[idx]
+	BestScore := math.Inf(-1)
+	BestIdx := Indices[0]
+	for _, idx := range Indices {
+		cs := Scores[idx]
 		sum := 0.0
-		for d, v := range cs.vec {
-			w := weights[d]
+		for d, v := range cs.Vec {
+			w := Weights[d]
 			sum += w * v
 		}
-		if sum > bestScore {
-			bestScore = sum
-			bestIdx = idx
+		if sum > BestScore {
+			BestScore = sum
+			BestIdx = idx
 		}
 	}
-	chosen := scores[bestIdx]
-	return chosen.node.ID, chosen.vec, nil
+	Chosen := Scores[BestIdx]
+	return Chosen.Node.ID, Chosen.Vec, nil
 }
 
 func (p *ExprPolicy) ExplainDecision(req Reservation) string {
-	return fmt.Sprintf("ExprPolicy(%s) dims=%v", p.name, p.dims)
+	return fmt.Sprintf("ExprPolicy(%s) Dims=%v", p.name, p.Dims)
 }
 
 // -------------------- Pareto helpers --------------------
 
-func paretoFrontIndices(scores []struct {
-	node  *ResourceNode
-	vec   map[string]float64
-	order int
-}) []int {
-	n := len(scores)
-	isDominated := make([]bool, n)
+type candScore struct {
+	Node  *ResourceNode
+	Vec   map[string]float64
+	Order int
+}
+
+func paretoFrontIndices(Scores []candScore) []int {
+	n := len(Scores)
+	IsDominated := make([]bool, n)
 	for i := 0; i < n; i++ {
 		for j := 0; j < n; j++ {
 			if i == j {
 				continue
 			}
-			if dominates(scores[j].vec, scores[i].vec) {
-				isDominated[i] = true
+			if dominates(Scores[j].Vec, Scores[i].Vec) {
+				IsDominated[i] = true
 				break
 			}
 		}
 	}
 	out := []int{}
 	for i := 0; i < n; i++ {
-		if !isDominated[i] {
+		if !IsDominated[i] {
 			out = append(out, i)
 		}
 	}
@@ -905,11 +901,11 @@ func dominatesVec(a, b map[string]float64) bool {
 // -------------------- Rebalance / Forecasting / Power-aware --------------------
 
 func (rp *ResourcePool) Rebalance() {
-	rp.mu.Lock()
-	rp.traceAppend(TraceInfo, "Rebalance", "start", nil, nil)
+	rp.Mu.Lock()
+	rp.TraceAppend(TraceInfo, "Rebalance", "start", nil, nil)
 	// compute util
 	util := map[string]float64{}
-	for id, n := range rp.nodes {
+	for id, n := range rp.Nodes {
 		var totalAllocated float64
 		var totalCap float64
 		for rt, avail := range n.Resources {
@@ -929,26 +925,26 @@ func (rp *ResourcePool) Rebalance() {
 		}
 	}
 	if len(overloaded) == 0 {
-		rp.traceAppend(TraceInfo, "Rebalance", "no-overload", nil, nil)
-		rp.mu.Unlock()
+		rp.TraceAppend(TraceInfo, "Rebalance", "no-overload", nil, nil)
+		rp.Mu.Unlock()
 		return
 	}
 	sort.Slice(overloaded, func(i, j int) bool { return util[overloaded[i]] > util[overloaded[j]] })
 
 	for _, src := range overloaded {
-		for resID, r := range rp.reserves {
+		for resID, r := range rp.Reserves {
 			if r.NodeID != src {
 				continue
 			}
 			if !r.Soft || r.Priority > 5 {
 				continue
 			}
-			for tid, tn := range rp.nodes {
+			for tid, tn := range rp.Nodes {
 				if tid == src || tn.Status != NODE_ONLINE {
 					continue
 				}
 				// forecast check
-				if rp.forecastHook != nil {
+				if rp.ForecastHook != nil {
 					predBlock := false
 					for _, rt := range []ResourceType{ResourceCPU, ResourceGPU} {
 						if rp.callForecastWithTimeout(rt, tn.Region, 30*time.Second) >= 0.95 {
@@ -981,7 +977,7 @@ func (rp *ResourcePool) Rebalance() {
 				if !okcap {
 					continue
 				}
-				if srcNode, ok := rp.nodes[src]; ok {
+				if srcNode, ok := rp.Nodes[src]; ok {
 					for rt, amt := range reqReqs {
 						srcNode.Allocated[rt] = math.Max(0, srcNode.Allocated[rt]-amt)
 						srcNode.Resources[rt] = srcNode.Resources[rt] + amt
@@ -995,27 +991,27 @@ func (rp *ResourcePool) Rebalance() {
 					tn.Allocated[rt] = tn.Allocated[rt] + amt
 				}
 				r.NodeID = tid
-				rp.reserves[resID] = r
-				rp.traceAppend(TraceInfo, "Rebalance", "migrated", map[string]any{"res": resID, "from": src, "to": tid}, rp.snapshotForExplain(tid))
+				rp.Reserves[resID] = r
+				rp.TraceAppend(TraceInfo, "Rebalance", "migrated", map[string]any{"res": resID, "from": src, "to": tid}, rp.snapshotForExplain(tid))
 				break
 			}
 		}
 	}
-	if rp.rebalanceHook != nil {
-		go rp.rebalanceHook(rp)
+	if rp.RebalanceHook != nil {
+		go rp.RebalanceHook(rp)
 	}
 	rp.updateKPIsLocked()
-	rp.mu.Unlock()
+	rp.Mu.Unlock()
 	rp.notify()
-	rp.traceAppend(TraceInfo, "Rebalance", "end", nil, nil)
+	rp.TraceAppend(TraceInfo, "Rebalance", "end", nil, nil)
 }
 
 // -------------------- Health / Self-Repair (bounded) --------------------
   
 func (rp *ResourcePool) StartHealthChecker(interval, timeout time.Duration) {
-	rp.mu.Lock()
+	rp.Mu.Lock()
 	if rp.stopHealthCh != nil {
-		rp.mu.Unlock()
+		rp.Mu.Unlock()
 		return
 	}
 	if interval <= 0 {
@@ -1028,7 +1024,7 @@ func (rp *ResourcePool) StartHealthChecker(interval, timeout time.Duration) {
 	rp.healthTimeout = timeout
 	stop := make(chan struct{})
 	rp.stopHealthCh = stop
-	rp.mu.Unlock()
+	rp.Mu.Unlock()
 
 	go func() {
 		t := time.NewTicker(rp.healthCheckInterval)
@@ -1042,73 +1038,73 @@ func (rp *ResourcePool) StartHealthChecker(interval, timeout time.Duration) {
 			}
 		}
 	}()
-	rp.traceAppend(TraceInfo, "HealthChecker", "started", map[string]any{"interval": rp.healthCheckInterval.String(), "timeout": rp.healthTimeout.String()}, nil)
+	rp.TraceAppend(TraceInfo, "HealthChecker", "started", map[string]any{"interval": rp.healthCheckInterval.String(), "timeout": rp.healthTimeout.String()}, nil)
 }
 
 func (rp *ResourcePool) StopHealthChecker() {
-	rp.mu.Lock()
+	rp.Mu.Lock()
 	ch := rp.stopHealthCh
 	if ch != nil {
 		close(ch)
 		rp.stopHealthCh = nil
 	}
-	rp.mu.Unlock()
+	rp.Mu.Unlock()
 	if ch != nil {
-		rp.traceAppend(TraceInfo, "HealthChecker", "stopped", nil, nil)
+		rp.TraceAppend(TraceInfo, "HealthChecker", "stopped", nil, nil)
 	}
 }
 
 func (rp *ResourcePool) performHealthCheck() {
-	rp.mu.Lock()
+	rp.Mu.Lock()
 	now := time.Now()
 	toRepair := []string{}
-	for id, n := range rp.nodes {
+	for id, n := range rp.Nodes {
 		if now.Sub(n.LastSeen) > rp.healthTimeout && n.Status == NODE_ONLINE {
 			n.Status = NODE_OFFLINE
-			rp.traceAppend(TraceWarn, "HealthCheck", "node-marked-offline", map[string]any{"node": id}, rp.snapshotForExplain(id))
+			rp.TraceAppend(TraceWarn, "HealthCheck", "Node-marked-offline", map[string]any{"Node": id}, rp.snapshotForExplain(id))
 			toRepair = append(toRepair, id)
 		}
 	}
-	rp.mu.Unlock()
+	rp.Mu.Unlock()
 
 	limit := maxRepairsPerTick
 	if limit > len(toRepair) {
 		limit = len(toRepair)
 	}
 	for i := 0; i < limit; i++ {
-		nodeID := toRepair[i]
+		NodeID := toRepair[i]
 		// sequential repair attempts (bounded)
 		time.Sleep(50 * time.Millisecond)
-		rp.mu.Lock()
-		if node, ok := rp.nodes[nodeID]; ok && node.Status == NODE_OFFLINE {
-			node.Status = NODE_MAINT
-			rp.traceAppend(TraceInfo, "HealthRepair", "node-maintenance-start", map[string]any{"node": nodeID}, nil)
+		rp.Mu.Lock()
+		if Node, ok := rp.Nodes[NodeID]; ok && Node.Status == NODE_OFFLINE {
+			Node.Status = NODE_MAINT
+			rp.TraceAppend(TraceInfo, "HealthRepair", "Node-maintenance-start", map[string]any{"Node": NodeID}, nil)
 			time.Sleep(200 * time.Millisecond)
-			node.Status = NODE_ONLINE
-			node.LastSeen = time.Now()
-			rp.traceAppend(TraceInfo, "HealthRepair", "node-repaired", map[string]any{"node": nodeID}, rp.snapshotForExplain(nodeID))
+			Node.Status = NODE_ONLINE
+			Node.LastSeen = time.Now()
+			rp.TraceAppend(TraceInfo, "HealthRepair", "Node-repaired", map[string]any{"Node": NodeID}, rp.snapshotForExplain(NodeID))
 			rp.notify()
 		}
-		rp.mu.Unlock()
+		rp.Mu.Unlock()
 	}
 }
 
 // CheckAndRepair synchronous simple repair routine
 func (rp *ResourcePool) CheckAndRepair() []string {
-	rp.mu.Lock()
-	defer rp.mu.Unlock()
+	rp.Mu.Lock()
+	defer rp.Mu.Unlock()
 	repaired := []string{}
 	now := time.Now()
-	for id, n := range rp.nodes {
+	for id, n := range rp.Nodes {
 		if n.Status == NODE_OFFLINE || n.Status == NODE_DEGRADED {
 			if now.Sub(n.LastSeen) <= 2*rp.healthTimeout {
 				n.Status = NODE_MAINT
 				n.LastSeen = now
 				n.Status = NODE_ONLINE
 				repaired = append(repaired, id)
-				rp.traceAppend(TraceInfo, "CheckAndRepair", "repaired", map[string]any{"node": id}, rp.snapshotForExplain(id))
+				rp.TraceAppend(TraceInfo, "CheckAndRepair", "repaired", map[string]any{"Node": id}, rp.snapshotForExplain(id))
 			} else {
-				rp.traceAppend(TraceWarn, "CheckAndRepair", "quarantine", map[string]any{"node": id}, nil)
+				rp.TraceAppend(TraceWarn, "CheckAndRepair", "quarantine", map[string]any{"Node": id}, nil)
 			}
 		}
 	}
@@ -1122,9 +1118,9 @@ func (rp *ResourcePool) CheckAndRepair() []string {
 // -------------------- Deadline Watcher (SLA guarantees) --------------------
 
 func (rp *ResourcePool) StartDeadlineWatcher(interval time.Duration) {
-	rp.mu.Lock()
+	rp.Mu.Lock()
 	if rp.stopDeadlineCh != nil {
-		rp.mu.Unlock()
+		rp.Mu.Unlock()
 		return
 	}
 	if interval <= 0 {
@@ -1132,7 +1128,7 @@ func (rp *ResourcePool) StartDeadlineWatcher(interval time.Duration) {
 	}
 	stop := make(chan struct{})
 	rp.stopDeadlineCh = stop
-	rp.mu.Unlock()
+	rp.Mu.Unlock()
 
 	go func() {
 		t := time.NewTicker(interval)
@@ -1146,31 +1142,31 @@ func (rp *ResourcePool) StartDeadlineWatcher(interval time.Duration) {
 			}
 		}
 	}()
-	rp.traceAppend(TraceInfo, "DeadlineWatcher", "started", map[string]any{"interval": interval.String()}, nil)
+	rp.TraceAppend(TraceInfo, "DeadlineWatcher", "started", map[string]any{"interval": interval.String()}, nil)
 }
 
 func (rp *ResourcePool) StopDeadlineWatcher() {
-	rp.mu.Lock()
+	rp.Mu.Lock()
 	ch := rp.stopDeadlineCh
 	if ch != nil {
 		close(ch)
 		rp.stopDeadlineCh = nil
 	}
-	rp.mu.Unlock()
+	rp.Mu.Unlock()
 	if ch != nil {
-		rp.traceAppend(TraceInfo, "DeadlineWatcher", "stopped", nil, nil)
+		rp.TraceAppend(TraceInfo, "DeadlineWatcher", "stopped", nil, nil)
 	}
 }
 
 func (rp *ResourcePool) enforceDeadlines() {
-	rp.mu.Lock()
-	defer rp.mu.Unlock()
+	rp.Mu.Lock()
+	defer rp.Mu.Unlock()
 	now := time.Now()
-	for id, r := range rp.reserves {
+	for id, r := range rp.Reserves {
 		if !r.Deadline.IsZero() {
 			remaining := r.Deadline.Sub(now)
 			if remaining < 30*time.Second {
-				for nid, n := range rp.nodes {
+				for nid, n := range rp.Nodes {
 					if nid == r.NodeID || n.Status != NODE_ONLINE {
 						continue
 					}
@@ -1192,7 +1188,7 @@ func (rp *ResourcePool) enforceDeadlines() {
 					if !okcap {
 						continue
 					}
-					if srcNode, ok := rp.nodes[r.NodeID]; ok {
+					if srcNode, ok := rp.Nodes[r.NodeID]; ok {
 						for rt, amt := range reqReqs {
 							srcNode.Allocated[rt] = math.Max(0, srcNode.Allocated[rt]-amt)
 							srcNode.Resources[rt] = srcNode.Resources[rt] + amt
@@ -1206,8 +1202,8 @@ func (rp *ResourcePool) enforceDeadlines() {
 						n.Allocated[rt] = n.Allocated[rt] + amt
 					}
 					r.NodeID = nid
-					rp.reserves[id] = r
-					rp.traceAppend(TraceInfo, "DeadlineWatcher", "rescheduled", map[string]any{"res": id, "to": nid}, rp.snapshotForExplain(nid))
+					rp.Reserves[id] = r
+					rp.TraceAppend(TraceInfo, "DeadlineWatcher", "rescheduled", map[string]any{"res": id, "to": nid}, rp.snapshotForExplain(nid))
 					break
 				}
 			}
@@ -1218,9 +1214,9 @@ func (rp *ResourcePool) enforceDeadlines() {
 // -------------------- Allocator / Pending Queue / Autoscaler --------------------
 
 func (rp *ResourcePool) StartAllocator(interval time.Duration) {
-	rp.mu.Lock()
+	rp.Mu.Lock()
 	if rp.allocatorStopCh != nil {
-		rp.mu.Unlock()
+		rp.Mu.Unlock()
 		return
 	}
 	if interval <= 0 {
@@ -1229,7 +1225,7 @@ func (rp *ResourcePool) StartAllocator(interval time.Duration) {
 	rp.allocatorInterval = interval
 	stop := make(chan struct{})
 	rp.allocatorStopCh = stop
-	rp.mu.Unlock()
+	rp.Mu.Unlock()
 
 	go func() {
 		t := time.NewTicker(rp.allocatorInterval)
@@ -1246,32 +1242,32 @@ func (rp *ResourcePool) StartAllocator(interval time.Duration) {
 			}
 		}
 	}()
-	rp.traceAppend(TraceInfo, "Allocator", "started", map[string]any{"interval": rp.allocatorInterval.String()}, nil)
+	rp.TraceAppend(TraceInfo, "Allocator", "started", map[string]any{"interval": rp.allocatorInterval.String()}, nil)
 }
 
 func (rp *ResourcePool) StopAllocator() {
-	rp.mu.Lock()
+	rp.Mu.Lock()
 	ch := rp.allocatorStopCh
 	if ch != nil {
 		close(ch)
 		rp.allocatorStopCh = nil
 	}
-	rp.mu.Unlock()
+	rp.Mu.Unlock()
 	if ch != nil {
-		rp.traceAppend(TraceInfo, "Allocator", "stopped", nil, nil)
+		rp.TraceAppend(TraceInfo, "Allocator", "stopped", nil, nil)
 	}
 }
 
 func (rp *ResourcePool) processPendingOnce() {
-	rp.mu.Lock()
+	rp.Mu.Lock()
 	if len(rp.pendingQueue) == 0 {
-		rp.mu.Unlock()
+		rp.Mu.Unlock()
 		return
 	}
 	queue := make([]Reservation, len(rp.pendingQueue))
 	copy(queue, rp.pendingQueue)
 	rp.pendingQueue = []Reservation{}
-	rp.mu.Unlock()
+	rp.Mu.Unlock()
 
 	remaining := make([]Reservation, 0, len(queue))
 	for _, req := range queue {
@@ -1279,23 +1275,23 @@ func (rp *ResourcePool) processPendingOnce() {
 		if policyName == "" {
 			policyName = "default-fairshare"
 		}
-		rp.mu.RLock()
-		policy := rp.policies[policyName]
-		rp.mu.RUnlock()
+		rp.Mu.RLock()
+		policy := rp.Policies[policyName]
+		rp.Mu.RUnlock()
 		if policy == nil {
 			remaining = append(remaining, req)
 			continue
 		}
-		nodeID, _, err := policy.Allocate(rp, req)
+		NodeID, _, err := policy.Allocate(rp, req)
 		if err != nil {
 			remaining = append(remaining, req)
 			continue
 		}
-		rp.mu.Lock()
-		n, ok := rp.nodes[nodeID]
+		rp.Mu.Lock()
+		n, ok := rp.Nodes[NodeID]
 		if !ok {
 			remaining = append(remaining, req)
-			rp.mu.Unlock()
+			rp.Mu.Unlock()
 			continue
 		}
 		reqReqs := map[ResourceType]float64{}
@@ -1315,7 +1311,7 @@ func (rp *ResourcePool) processPendingOnce() {
 		}
 		if !okcap {
 			remaining = append(remaining, req)
-			rp.mu.Unlock()
+			rp.Mu.Unlock()
 			continue
 		}
 		for rt, amt := range reqReqs {
@@ -1325,38 +1321,38 @@ func (rp *ResourcePool) processPendingOnce() {
 			}
 			n.Allocated[rt] = n.Allocated[rt] + amt
 		}
-		req.NodeID = nodeID
-		rp.reserves[req.ID] = req
-		rp.traceAppend(TraceInfo, "Allocator", "allocated-from-queue", map[string]any{"req": req.ID, "node": nodeID}, rp.snapshotForExplain(nodeID))
+		req.NodeID = NodeID
+		rp.Reserves[req.ID] = req
+		rp.TraceAppend(TraceInfo, "Allocator", "allocated-from-queue", map[string]any{"req": req.ID, "Node": NodeID}, rp.snapshotForExplain(NodeID))
 		rp.updateKPIsLocked()
-		rp.mu.Unlock()
+		rp.Mu.Unlock()
 	}
-	rp.mu.Lock()
+	rp.Mu.Lock()
 	rp.pendingQueue = append(rp.pendingQueue, remaining...)
-	rp.mu.Unlock()
+	rp.Mu.Unlock()
 	if len(remaining) > 0 {
-		rp.traceAppend(TraceInfo, "Allocator", "queue-left", map[string]any{"left": len(remaining)}, nil)
+		rp.TraceAppend(TraceInfo, "Allocator", "queue-left", map[string]any{"left": len(remaining)}, nil)
 	}
 }
 
 func (rp *ResourcePool) SetAllocatorHook(h AllocatorHook) {
-	rp.mu.Lock()
+	rp.Mu.Lock()
 	rp.allocatorHook = h
-	rp.mu.Unlock()
-	rp.traceAppend(TraceInfo, "SetAllocatorHook", "hook-set", nil, nil)
+	rp.Mu.Unlock()
+	rp.TraceAppend(TraceInfo, "SetAllocatorHook", "hook-set", nil, nil)
 }
 
 func (rp *ResourcePool) SetAutoscalerHook(h AutoscalerHook) {
-	rp.mu.Lock()
+	rp.Mu.Lock()
 	rp.autoscalerHook = h
-	rp.mu.Unlock()
-	rp.traceAppend(TraceInfo, "SetAutoscalerHook", "hook-set", nil, nil)
+	rp.Mu.Unlock()
+	rp.TraceAppend(TraceInfo, "SetAutoscalerHook", "hook-set", nil, nil)
 }
 
 func (rp *ResourcePool) StartAutoscaler(interval time.Duration) {
-	rp.mu.Lock()
+	rp.Mu.Lock()
 	if rp.autoscalerStopCh != nil {
-		rp.mu.Unlock()
+		rp.Mu.Unlock()
 		return
 	}
 	if interval <= 0 {
@@ -1365,7 +1361,7 @@ func (rp *ResourcePool) StartAutoscaler(interval time.Duration) {
 	rp.autoscalerInterval = interval
 	stop := make(chan struct{})
 	rp.autoscalerStopCh = stop
-	rp.mu.Unlock()
+	rp.Mu.Unlock()
 
 	go func() {
 		t := time.NewTicker(rp.autoscalerInterval)
@@ -1381,26 +1377,26 @@ func (rp *ResourcePool) StartAutoscaler(interval time.Duration) {
 			}
 		}
 	}()
-	rp.traceAppend(TraceInfo, "Autoscaler", "started", map[string]any{"interval": rp.autoscalerInterval.String()}, nil)
+	rp.TraceAppend(TraceInfo, "Autoscaler", "started", map[string]any{"interval": rp.autoscalerInterval.String()}, nil)
 }
 
 func (rp *ResourcePool) StopAutoscaler() {
-	rp.mu.Lock()
+	rp.Mu.Lock()
 	ch := rp.autoscalerStopCh
 	if ch != nil {
 		close(ch)
 		rp.autoscalerStopCh = nil
 	}
-	rp.mu.Unlock()
+	rp.Mu.Unlock()
 	if ch != nil {
-		rp.traceAppend(TraceInfo, "Autoscaler", "stopped", nil, nil)
+		rp.TraceAppend(TraceInfo, "Autoscaler", "stopped", nil, nil)
 	}
 }
 
 // -------------------- Trace / KPIs / Utilities --------------------
 
-func (rp *ResourcePool) traceAppend(level TraceLevel, op, msg string, details map[string]any, snapshot map[string]any) {
-	rp.trace = append(rp.trace, TraceEntry{
+func (rp *ResourcePool) TraceAppend(level TraceLevel, op, msg string, details map[string]any, snapshot map[string]any) {
+	rp.Trace = append(rp.Trace, TraceEntry{
 		Time:     time.Now(),
 		Level:    level,
 		Op:       op,
@@ -1408,28 +1404,28 @@ func (rp *ResourcePool) traceAppend(level TraceLevel, op, msg string, details ma
 		Details:  details,
 		Snapshot: snapshot,
 	})
-	if len(rp.trace) > rp.traceMax {
-		rp.trace = rp.trace[len(rp.trace)-rp.traceMax:]
+	if len(rp.Trace) > rp.TraceMax {
+		rp.Trace = rp.Trace[len(rp.Trace)-rp.TraceMax:]
 	}
 }
 
 func (rp *ResourcePool) GetTrace() []TraceEntry {
-	rp.mu.RLock()
-	defer rp.mu.RUnlock()
-	out := make([]TraceEntry, len(rp.trace))
-	copy(out, rp.trace)
+	rp.Mu.RLock()
+	defer rp.Mu.RUnlock()
+	out := make([]TraceEntry, len(rp.Trace))
+	copy(out, rp.Trace)
 	return out
 }
 
-func (rp *ResourcePool) snapshotForExplain(nodeID string) map[string]any {
-	rp.mu.RLock()
-	defer rp.mu.RUnlock()
-	n, ok := rp.nodes[nodeID]
+func (rp *ResourcePool) snapshotForExplain(NodeID string) map[string]any {
+	rp.Mu.RLock()
+	defer rp.Mu.RUnlock()
+	n, ok := rp.Nodes[NodeID]
 	if !ok {
 		return nil
 	}
 	return map[string]any{
-		"node":      n.ID,
+		"Node":      n.ID,
 		"region":    n.Region,
 		"pool_tier": n.PoolTier,
 		"status":    n.Status,
@@ -1442,7 +1438,7 @@ func (rp *ResourcePool) snapshotForExplain(nodeID string) map[string]any {
 
 func (rp *ResourcePool) updateKPIsLocked() {
 	var cpuTotal, cpuAllocated, gpuTotal, gpuAllocated float64
-	for _, n := range rp.nodes {
+	for _, n := range rp.Nodes {
 		cpuTotal += n.Resources[ResourceCPU] + n.Allocated[ResourceCPU]
 		cpuAllocated += n.Allocated[ResourceCPU]
 		gpuTotal += n.Resources[ResourceGPU] + n.Allocated[ResourceGPU]
@@ -1458,9 +1454,9 @@ func (rp *ResourcePool) updateKPIsLocked() {
 	} else {
 		rp.KPIs["utilization_gpu"] = 0.0
 	}
-	rp.KPIs["reservations_count"] = float64(len(rp.reserves))
+	rp.KPIs["reservations_count"] = float64(len(rp.Reserves))
 	totalJ := 0.0
-	for _, n := range rp.nodes {
+	for _, n := range rp.Nodes {
 		tot := float64(n.TDP)
 		cpuCap := n.Resources[ResourceCPU] + n.Allocated[ResourceCPU]
 		if cpuCap > 0 {
@@ -1487,8 +1483,8 @@ func (rp *ResourcePool) updateAvgAllocLatency(d time.Duration) {
 }
 
 func (rp *ResourcePool) GetKPIs() map[string]float64 {
-	rp.mu.RLock()
-	defer rp.mu.RUnlock()
+	rp.Mu.RLock()
+	defer rp.Mu.RUnlock()
 	out := make(map[string]float64, len(rp.KPIs))
 	for k, v := range rp.KPIs {
 		out[k] = v
@@ -1497,9 +1493,9 @@ func (rp *ResourcePool) GetKPIs() map[string]float64 {
 }
 
 func (rp *ResourcePool) callForecastWithTimeout(rt ResourceType, region string, horizon time.Duration) float64 {
-	rp.mu.RLock()
-	hook := rp.forecastHook
-	rp.mu.RUnlock()
+	rp.Mu.RLock()
+	hook := rp.ForecastHook
+	rp.Mu.RUnlock()
 	if hook == nil {
 		return 0.0
 	}
@@ -1560,20 +1556,20 @@ func copyMapResources(in map[ResourceType]float64) map[ResourceType]float64 {
 	return out
 }
 
-func matchesAffinity(node *ResourceNode, r Reservation) bool {
+func matchesAffinity(Node *ResourceNode, r Reservation) bool {
 	if len(r.Affinity) == 0 && len(r.AntiAffinity) == 0 {
 		return true
 	}
 	if len(r.Affinity) > 0 {
 		ok := false
 		for _, a := range r.Affinity {
-			if a == node.ID {
+			if a == Node.ID {
 				ok = true
 				break
 			}
 			parts := strings.SplitN(a, "=", 2)
 			if len(parts) == 2 {
-				if v, exists := node.Labels[parts[0]]; exists && v == parts[1] {
+				if v, exists := Node.Labels[parts[0]]; exists && v == parts[1] {
 					ok = true
 					break
 				}
@@ -1584,12 +1580,12 @@ func matchesAffinity(node *ResourceNode, r Reservation) bool {
 		}
 	}
 	for _, a := range r.AntiAffinity {
-		if a == node.ID {
+		if a == Node.ID {
 			return false
 		}
 		parts := strings.SplitN(a, "=", 2)
 		if len(parts) == 2 {
-			if v, exists := node.Labels[parts[0]]; exists && v == parts[1] {
+			if v, exists := Node.Labels[parts[0]]; exists && v == parts[1] {
 				return false
 			}
 		}
@@ -1604,9 +1600,9 @@ type DefaultFairSharePolicy struct{}
 func (p *DefaultFairSharePolicy) Name() string { return "default-fairshare" }
 
 func (p *DefaultFairSharePolicy) Allocate(pool *ResourcePool, req Reservation) (string, map[string]float64, error) {
-	pool.mu.RLock()
-	cands := make([]*ResourceNode, 0, len(pool.nodes))
-	for _, n := range pool.nodes {
+	pool.Mu.RLock()
+	Cands := make([]*ResourceNode, 0, len(pool.Nodes))
+	for _, n := range pool.Nodes {
 		if n.Status != NODE_ONLINE {
 			continue
 		}
@@ -1631,27 +1627,27 @@ func (p *DefaultFairSharePolicy) Allocate(pool *ResourcePool, req Reservation) (
 		if !okcap {
 			continue
 		}
-		cands = append(cands, n)
+		Cands = append(Cands, n)
 	}
-	pool.mu.RUnlock()
+	pool.Mu.RUnlock()
 
-	if len(cands) == 0 {
+	if len(Cands) == 0 {
 		return "", nil, ErrNoResource
 	}
-	bestIdx := 0
-	bestVec := map[string]float64{}
-	for i, n := range cands {
+	BestIdx := 0
+	BestVec := map[string]float64{}
+	for i, n := range Cands {
 		free := 0.0
 		for _, rt := range []ResourceType{ResourceCPU, ResourceGPU, ResourceRAM} {
 			free += n.Resources[rt]
 		}
-		vec := map[string]float64{"free_capacity": free, "energy_score": -float64(n.TDP)}
-		if i == 0 || dominatesVec(vec, bestVec) {
-			bestVec = vec
-			bestIdx = i
+		Vec := map[string]float64{"free_capacity": free, "energy_score": -float64(n.TDP)}
+		if i == 0 || dominatesVec(Vec, BestVec) {
+			BestVec = Vec
+			BestIdx = i
 		}
 	}
-	return cands[bestIdx].ID, bestVec, nil
+	return Cands[BestIdx].ID, BestVec, nil
 }
 
 func (p *DefaultFairSharePolicy) ExplainDecision(req Reservation) string {
@@ -1664,13 +1660,13 @@ func (p *CostAwarePolicy) Name() string { return "cost-aware" }
 
 func (p *CostAwarePolicy) Allocate(pool *ResourcePool, req Reservation) (string, map[string]float64, error) {
 	type cand struct {
-		node  *ResourceNode
-		vec   map[string]float64
+		Node  *ResourceNode
+		Vec   map[string]float64
 		score float64
 	}
-	pool.mu.RLock()
+	pool.Mu.RLock()
 	candidates := []cand{}
-	for _, n := range pool.nodes {
+	for _, n := range pool.Nodes {
 		if n.Status != NODE_ONLINE {
 			continue
 		}
@@ -1708,18 +1704,18 @@ func (p *CostAwarePolicy) Allocate(pool *ResourcePool, req Reservation) (string,
 		for _, rt := range []ResourceType{ResourceCPU, ResourceGPU, ResourceRAM} {
 			free += n.Resources[rt]
 		}
-		vec := map[string]float64{"free": free, "cost": cost}
+		Vec := map[string]float64{"free": free, "cost": cost}
 		score := free / cost
-		candidates = append(candidates, cand{node: n, vec: vec, score: score})
+		candidates = append(candidates, cand{Node: n, Vec: Vec, score: score})
 	}
-	pool.mu.RUnlock()
+	pool.Mu.RUnlock()
 
 	if len(candidates) == 0 {
 		return "", nil, ErrNoResource
 	}
 	sort.Slice(candidates, func(i, j int) bool { return candidates[i].score > candidates[j].score })
-	chosen := candidates[0]
-	return chosen.node.ID, chosen.vec, nil
+	Chosen := candidates[0]
+	return Chosen.Node.ID, Chosen.Vec, nil
 }
 
 func (p *CostAwarePolicy) ExplainDecision(req Reservation) string {
@@ -1729,19 +1725,19 @@ func (p *CostAwarePolicy) ExplainDecision(req Reservation) string {
 // -------------------- Expose / Listeners / Gossip placeholder --------------------
 
 func (rp *ResourcePool) RegisterOnChange(f func()) {
-	rp.mu.Lock()
-	rp.onChange = append(rp.onChange, f)
-	rp.mu.Unlock()
+	rp.Mu.Lock()
+	rp.OnChange = append(rp.OnChange, f)
+	rp.Mu.Unlock()
 }
 
 func (rp *ResourcePool) notify() {
-	for _, f := range rp.onChange {
+	for _, f := range rp.OnChange {
 		go f()
 	}
 }
 
 func (rp *ResourcePool) StartGossip() {
-	rp.traceAppend(TraceInfo, "Gossip", "start-placeholder", nil, nil)
+	rp.TraceAppend(TraceInfo, "Gossip", "start-placeholder", nil, nil)
 }
 
 func (rp *ResourcePool) SetRebalanceHookExternal(h func(*ResourcePool)) {
@@ -1749,23 +1745,23 @@ func (rp *ResourcePool) SetRebalanceHookExternal(h func(*ResourcePool)) {
 }
 
 func (rp *ResourcePool) SetRebalanceHook(h func(pool *ResourcePool)) {
-	rp.mu.Lock()
-	rp.rebalanceHook = h
-	rp.mu.Unlock()
-	rp.traceAppend(TraceInfo, "SetRebalanceHook", "hook-set", nil, nil)
+	rp.Mu.Lock()
+	rp.RebalanceHook = h
+	rp.Mu.Unlock()
+	rp.TraceAppend(TraceInfo, "SetRebalanceHook", "hook-set", nil, nil)
 }
 
 // -------------------- Expose Functions --------------------
 
 func (rp *ResourcePool) ExposeFunctions() map[string]any {
 	return map[string]any{
-		"add_node":                 rp.AddNode,
-		"add_nodes":                rp.AddNodes,
-		"remove_node":              rp.RemoveNode,
-		"update_node_status":       rp.UpdateNodeStatus,
-		"update_node_resources":    rp.UpdateNodeResources,
-		"update_node_meta":         rp.UpdateNodeMeta,
-		"get_node_info":            rp.GetNodeInfo,
+		"add_Node":                 rp.AddNode,
+		"add_Nodes":                rp.AddNodes,
+		"remove_Node":              rp.RemoveNode,
+		"update_Node_status":       rp.UpdateNodeStatus,
+		"update_Node_resources":    rp.UpdateNodeResources,
+		"update_Node_meta":         rp.UpdateNodeMeta,
+		"get_Node_info":            rp.GetNodeInfo,
 		"allocate":                 rp.Allocate,
 		"free":                     rp.Free,
 		"free_many":                rp.FreeMany,
@@ -1775,11 +1771,11 @@ func (rp *ResourcePool) ExposeFunctions() map[string]any {
 		"inject_policy":            rp.InjectPolicy,
 		"remove_policy":            rp.RemovePolicy,
 		"register_policy_dsl":      rp.RegisterPolicyFromDSL,
-		"register_policy_multi":    rp.RegisterMultiDimPolicyFromDSL,
+		"register_policy_Multi":    rp.RegisterMultiDimPolicyFromDSL,
 		"register_policy_loader":   rp.RegisterPolicyFromLoader,
 		"set_policy_verifier":      rp.SetPolicyVerifier,
 		"get_kpis":                 rp.GetKPIs,
-		"get_trace":                rp.GetTrace,
+		"get_Trace":                rp.GetTrace,
 		"set_autodev_hook":         rp.SetAutoDev,
 		"set_forecast_hook":        rp.SetForecastHook,
 		"start_health_checker":     func(intervalSec int) { rp.StartHealthChecker(time.Duration(intervalSec) * time.Second, rp.healthTimeout) },
@@ -1800,8 +1796,8 @@ func (rp *ResourcePool) ExposeFunctions() map[string]any {
 }
 
 func (rp *ResourcePool) ListPending() []Reservation {
-	rp.mu.RLock()
-	defer rp.mu.RUnlock()
+	rp.Mu.RLock()
+	defer rp.Mu.RUnlock()
 	out := make([]Reservation, 0, len(rp.pendingQueue))
 	for _, r := range rp.pendingQueue {
 		out = append(out, r)
@@ -1810,21 +1806,21 @@ func (rp *ResourcePool) ListPending() []Reservation {
 }
 
 func (rp *ResourcePool) SetForecastHook(h ForecastHook) {
-	rp.mu.Lock()
-	rp.forecastHook = h
-	rp.mu.Unlock()
-	rp.traceAppend(TraceInfo, "SetForecastHook", "forecast-hook-set", nil, nil)
+	rp.Mu.Lock()
+	rp.ForecastHook = h
+	rp.Mu.Unlock()
+	rp.TraceAppend(TraceInfo, "SetForecastHook", "forecast-hook-set", nil, nil)
 	rp.notify()
 }
 
-// PredictUtilization returns a snapshot prediction across nodes (naive snapshot).
-// Orchestrator/forecastHook may provide better predictions via SetForecastHook.
+// PredictUtilization returns a snapshot prediction across Nodes (naive snapshot).
+// Orchestrator/ForecastHook may provide better predictions via SetForecastHook.
 func (rp *ResourcePool) PredictUtilization() map[string]float64 {
-	rp.mu.RLock()
-	defer rp.mu.RUnlock()
+	rp.Mu.RLock()
+	defer rp.Mu.RUnlock()
 	out := map[string]float64{"cpu": 0.0, "gpu": 0.0}
 	var cpuTotal, cpuUsed, gpuTotal, gpuUsed float64
-	for _, n := range rp.nodes {
+	for _, n := range rp.Nodes {
 		cpuTotal += n.Resources[ResourceCPU] + n.Allocated[ResourceCPU]
 		cpuUsed += n.Allocated[ResourceCPU]
 		gpuTotal += n.Resources[ResourceGPU] + n.Allocated[ResourceGPU]

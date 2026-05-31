@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"konrotaharai-netizen/internal/secstore"
+	"github.com/Aurionex/NebulaCore/internal/secstore"
 )
 
 // AuditEvent is canonical audit record with chain hashes.
@@ -210,7 +210,7 @@ func (a *Auditor) checkpoint(ctx context.Context) error {
 	b, _ := json.Marshal(meta)
 	if a.ks != nil {
 		name := "audit_checkpoint_" + time.Now().UTC().Format("20060102T150405")
-		if err := a.ks.PutRaw(name, b); err != nil {
+		if err := a.ks.Put(ctx, name, b); err != nil {
 			a.logger.Printf("audit checkpoint putraw failed: %v", err)
 			return err
 		}

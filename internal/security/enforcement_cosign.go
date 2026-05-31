@@ -1,8 +1,10 @@
 package security
 
 import (
+t"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"github.com/Aurionex/NebulaCore/internal/secstore"
 	"fmt"
 	"io"
 	"os"
@@ -19,7 +21,7 @@ func NewInternalCosignVerifier(ks KeystoreGetter) *InternalCosignVerifier {
 }
 
 // VerifyArtifact computes sha256 in a streaming manner and verifies signature (supports base64 encoded sig file or raw).
-func (v *InternalCosignVerifier) VerifyArtifact(artifactPath, sigPath, pubKeyName string) (bool, error) {
+func (v *InternalCosignVerifier) VerifyArtifact(ctx context.Context, artifactPath, sigPath, pubKeyName string) (bool, error) {
 	f, err := os.Open(artifactPath)
 	if err != nil {
 		return false, fmt.Errorf("artifact open: %w", err)
@@ -42,7 +44,7 @@ func (v *InternalCosignVerifier) VerifyArtifact(artifactPath, sigPath, pubKeyNam
 	} else {
 		sig = sigB
 	}
-	pubPEM, err := v.ks.GetRaw(pubKeyName)
+	pubPEM, err := v.ks.GetKeystore().(*secstore.SimpleEncryptedStore).Get(ctx, pubKeyName)
 	if err != nil {
 		return false, fmt.Errorf("pubkey not found: %w", err)
 	}

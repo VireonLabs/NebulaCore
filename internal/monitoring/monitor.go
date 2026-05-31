@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"konrotaharai-netizen/internal/logging"
-	"konrotaharai-netizen/internal/security"
+	"github.com/Aurionex/NebulaCore/internal/logging"
+	"github.com/Aurionex/NebulaCore/internal/security"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"

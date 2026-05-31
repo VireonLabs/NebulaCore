@@ -20,13 +20,11 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -215,7 +213,8 @@ func (t *TCPFastConn) SendChunks(ctx context.Context, chunks [][]byte) error {
 			}
 		}
 		// Try zero-copy with net.Buffers (writev) if available
-		if nb := net.Buffers{c}; len(nb) > 0 {
+		nb := net.Buffers{c}
+		if len(nb) > 0 {
 			_, err := nb.WriteTo(t.conn)
 			if err != nil {
 				return err
@@ -267,14 +266,14 @@ func (t *TCPFastConn) Metrics() TransportMetrics           { return t.metrics }
 
 // QUICConn: modern multipath QUIC transport (uses quic-go)
 type QUICConn struct {
-	session quic.Connection
+	session quic.Conn
 	stream  quic.Stream
 	metrics TransportMetrics
 	closed  bool
 	mu      sync.Mutex
 }
 
-func newQUICConn(session quic.Connection, stream quic.Stream) *QUICConn {
+func newQUICConn(session quic.Conn, stream quic.Stream) *QUICConn {
 	return &QUICConn{session: session, stream: stream}
 }
 
@@ -337,8 +336,8 @@ func (w *WritevConn) SendChunks(ctx context.Context, chunks [][]byte) error {
 	for _, c := range chunks {
 		bufs = append(bufs, c)
 	}
-	_, err := bufs.WriteTo(w.conn)
-	w.metrics.BytesSent += int64(bufs.Len())
+	n, err := bufs.WriteTo(w.conn)
+	w.metrics.BytesSent += n
 	w.metrics.LastUpdate = time.Now()
 	return err
 }

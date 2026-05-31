@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"time"
 
-	"konrotaharai-netizen/internal/secstore"
-	"konrotaharai-netizen/internal/tlsutil"
+	"github.com/Aurionex/NebulaCore/internal/secstore"
+	"github.com/Aurionex/NebulaCore/internal/tlsutil"
 
 	"github.com/spiffe/go-spiffe/v2/spiffetls"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
